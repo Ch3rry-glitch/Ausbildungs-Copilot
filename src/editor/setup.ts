@@ -64,6 +64,39 @@ const cockpitHighlight = HighlightStyle.define([
   { tag: t.quote, color: "var(--text-2)" },
 ]);
 
+/** Deutsche Texte für die eingebauten CodeMirror-Oberflächen (Suche, Konfliktansicht, Falten). */
+const PHRASEN_DE: Record<string, string> = {
+  // @codemirror/merge
+  "$ unchanged lines": "$ unveränderte Zeilen",
+  "Accept": "Übernehmen",
+  "Reject": "Ablehnen",
+  "Revert this chunk": "Diesen Abschnitt übernehmen",
+  // @codemirror/search
+  "Find": "Suchen",
+  "Replace": "Ersetzen",
+  "next": "weiter",
+  "previous": "zurück",
+  "all": "alle",
+  "match case": "Groß/klein beachten",
+  "regexp": "Regulärer Ausdruck",
+  "by word": "ganzes Wort",
+  "replace": "ersetzen",
+  "replace all": "alle ersetzen",
+  "close": "schließen",
+  "current match": "aktueller Treffer",
+  "on line": "in Zeile",
+  "replaced match on line $": "Treffer in Zeile $ ersetzt",
+  "replaced $ matches": "$ Treffer ersetzt",
+  "Go to line": "Gehe zu Zeile",
+  "go": "los",
+  // @codemirror/view, language, commands
+  "Control character": "Steuerzeichen",
+  "Selection deleted": "Auswahl gelöscht",
+  "folded code": "eingeklappter Text",
+  "unfold": "ausklappen",
+  "to": "bis",
+};
+
 /**
  * Für Haupteditor UND MergeView. Enthält bewusst keine Tastenkürzel und keinen Listener,
  * damit Strg+S im Konfliktdialog nie den alten Hauptpuffer speichert.
@@ -71,6 +104,7 @@ const cockpitHighlight = HighlightStyle.define([
 export const editorBase: Extension[] = [
   // Nur "\n" trennt Zeilen – ein einzelnes "\r" in der Datei bleibt unangetastet.
   EditorState.lineSeparator.of("\n"),
+  EditorState.phrases.of(PHRASEN_DE),
   // Eingefügter/fallengelassener Windows-Text würde sonst "\r" auf jeder Zeile mitbringen.
   EditorView.clipboardInputFilter.of((text) => text.replace(/\r\n?/g, "\n")),
   markdown({ base: markdownLanguage }),
