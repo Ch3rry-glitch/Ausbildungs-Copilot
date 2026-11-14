@@ -1,12 +1,15 @@
 import type { AppStatus } from "../api";
 import { Icon } from "../icons";
 
-export type View = "notizen" | "einstellungen";
+export type View = "heute" | "unterricht" | "notizen" | "einstellungen";
 
 // Reihenfolge laut SPEC §8. Noch nicht gebaute Bereiche zeigen ihren Meilenstein.
-const ITEMS: { key: string; label: string; milestone?: string }[] = [
-  { key: "heute", label: "Heute", milestone: "M1" },
-  { key: "unterricht", label: "Unterricht", milestone: "M1" },
+const ACTIVE: { key: View; label: string }[] = [
+  { key: "heute", label: "Heute" },
+  { key: "unterricht", label: "Unterricht" },
+];
+
+const SOON: { key: string; label: string; milestone: string }[] = [
   { key: "logbuch", label: "Logbuch", milestone: "M2" },
   { key: "aufgaben", label: "Aufgaben", milestone: "M3" },
   { key: "fragen", label: "Fragen", milestone: "M3" },
@@ -15,7 +18,17 @@ const ITEMS: { key: string; label: string; milestone?: string }[] = [
   { key: "pruefungen", label: "Prüfungen", milestone: "M6" },
 ];
 
-export function Sidebar({ view, onView, status }: { view: View; onView: (v: View) => void; status: AppStatus }) {
+export function Sidebar({
+  view,
+  onView,
+  status,
+  editorDirty,
+}: {
+  view: View;
+  onView: (v: View) => void;
+  status: AppStatus;
+  editorDirty: boolean;
+}) {
   return (
     <aside className="sidebar glass">
       <div className="brand">
@@ -26,7 +39,15 @@ export function Sidebar({ view, onView, status }: { view: View; onView: (v: View
         </div>
       </div>
 
-      {ITEMS.map((it) => (
+      {ACTIVE.map((it) => (
+        <button key={it.key} className={`nav-item ${view === it.key ? "active" : ""}`} onClick={() => onView(it.key)}>
+          {Icon[it.key]}
+          {it.label}
+          {it.key === "unterricht" && editorDirty && <span className="nav-dot" title="Ungespeicherte Änderungen" />}
+        </button>
+      ))}
+
+      {SOON.map((it) => (
         <button key={it.key} className="nav-item" disabled title={`kommt in ${it.milestone}`}>
           {Icon[it.key]}
           {it.label}
