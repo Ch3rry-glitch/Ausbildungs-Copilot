@@ -1,0 +1,5 @@
+# Einheitlich LF im Repository und im Arbeitsverzeichnis (Shell-Skripte, Testvault, Starter-Vault).
+* text=auto eol=lf
+*.png binary
+*.ico binary
+*.icns binary

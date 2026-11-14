@@ -1,0 +1,15 @@
+# Build-Ausgaben
+/dist/
+/src-tauri/target/
+/src-tauri/gen/schemas/
+
+# Abhängigkeiten
+/node_modules/
+
+# Editor / OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+*.log
