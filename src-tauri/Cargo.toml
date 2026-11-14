@@ -1,0 +1,45 @@
+[package]
+name = "ausbildungs-cockpit"
+version = "0.1.0"
+description = "Ausbildungs-Cockpit – zweite Oberfläche auf den Obsidian-Lernvault"
+authors = ["Ausbildungs-Cockpit"]
+edition = "2021"
+rust-version = "1.80"
+
+[lib]
+name = "ausbildungs_cockpit_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+# main.rs enthält keine Tests; der leere Test-Runner wird von Windows Defender
+# fälschlich blockiert (os error 225). Alle Tests liegen in der Bibliothek und in tests/.
+[[bin]]
+name = "ausbildungs-cockpit"
+path = "src/main.rs"
+test = false
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+chrono = { version = "0.4.45", features = ["serde"] }
+dirs = "7.0.0"
+include_dir = "0.7.4"
+notify = "8.2.0"
+notify-debouncer-mini = "0.7.0"
+regex = "1.13.1"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+serde_yaml = "0.9.34"
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+thiserror = "2.0.21"
+
+[dev-dependencies]
+tempfile = "3.27.0"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true
