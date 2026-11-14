@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{AppError, AppResult};
+use crate::model::LogbuchFach;
 
 pub const APP_DIR_NAME: &str = "ausbildungs-cockpit";
 const CONFIG_FILE: &str = "config.json";
@@ -19,6 +20,21 @@ pub struct AppConfig {
     pub vault_path: Option<PathBuf>,
     #[serde(default)]
     pub recent_vaults: Vec<PathBuf>,
+    /// M2: Logbuch je Fach. Fehlt ein Fach hier, gilt die Voreinstellung
+    /// ([`crate::logbuch::voreinstellung`]: GEC aktiv, alle anderen aus).
+    #[serde(default)]
+    pub logbuch: Vec<LogbuchFach>,
+    /// M2: KI-Einstellungen (der Schlüssel liegt **nicht** hier, sondern im Anmeldeinformationsspeicher)
+    #[serde(default)]
+    pub ki: KiEinstellungen,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KiEinstellungen {
+    /// Modell-ID; leer = Standardmodell
+    #[serde(default)]
+    pub modell: String,
 }
 
 fn default_version() -> u32 {

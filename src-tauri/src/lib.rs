@@ -12,6 +12,8 @@
 //! * [`starter`] – leerer Starter-Vault für Mitschüler
 //! * [`obsidian`] – `obsidian://`-Links
 //! * [`config`]  – Einstellungen in `%APPDATA%\ausbildungs-cockpit`
+//! * [`logbuch`] – Logbucheinträge für Moodle: Entwurf, Text, Status (nur `logbuch:` im Vault)
+//! * [`ki`]      – KI hinter `LlmProvider` (Anthropic), Schlüssel im Anmeldeinformationsspeicher
 //! * [`commands`] – Tauri-Befehle
 
 pub mod commands;
@@ -20,6 +22,8 @@ pub mod error;
 pub mod guard;
 pub mod heute;
 pub mod index;
+pub mod ki;
+pub mod logbuch;
 pub mod model;
 pub mod obsidian;
 pub mod starter;
@@ -142,6 +146,7 @@ pub fn dev_vault_copy(src: &Path, temp: &Path) -> io::Result<PathBuf> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let state = AppState::load(config_dir());
@@ -179,6 +184,17 @@ pub fn run() {
             commands::preview_unterricht_note,
             commands::create_unterricht_note,
             commands::save_note,
+            commands::logbuch_einstellungen,
+            commands::logbuch_einstellungen_speichern,
+            commands::logbuch_uebersicht,
+            commands::logbuch_entwurf,
+            commands::logbuch_text,
+            commands::logbuch_kopieren,
+            commands::logbuch_status_setzen,
+            commands::ki_status,
+            commands::ki_schluessel_speichern,
+            commands::ki_schluessel_loeschen,
+            commands::ki_modell_setzen,
         ])
         .run(tauri::generate_context!())
         .expect("Ausbildungs-Cockpit konnte nicht gestartet werden");

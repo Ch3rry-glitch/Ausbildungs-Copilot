@@ -17,12 +17,15 @@ use crate::config::{self, AppConfig};
 use crate::error::{AppError, AppResult};
 use crate::index::{self, VaultIndex};
 use crate::model::{
-    AppStatus, CreateResult, FachInfo, FolderInfo, HeuteTag, LernfeldInfo, NeueUnterrichtsnotiz, NoteContent,
-    NoteSummary, NoteVersion, NotizVorschau, SaveResult, StarterReport, VaultChanged, WriteReport,
+    AppStatus, CreateResult, FachInfo, FolderInfo, HeuteTag, KiStatus, LernfeldInfo, LogbuchAnfrage, LogbuchEntwurf,
+    LogbuchFach, LogbuchKopieren, LogbuchKopiert, LogbuchStatus, LogbuchStatusReport, LogbuchTextAnfrage,
+    LogbuchUebersicht, NeueUnterrichtsnotiz, NoteContent, NoteMeta, NoteSummary, NoteVersion, NotizVorschau, RelPath,
+    SaveResult, StarterReport, VaultChanged, WriteReport,
 };
 use crate::watcher::{self, SharedIndex, VaultWatcher};
 use crate::write::{self, RetryPolicy, SaveOutcome, SelfWrites};
-use crate::{guard, heute as heute_mod, obsidian, starter, unterricht};
+use crate::{guard, heute as heute_mod, ki, logbuch, obsidian, starter, unterricht};
+use tauri_plugin_clipboard_manager::ClipboardExt;
 
 pub const EVENT_VAULT_CHANGED: &str = "vault-changed";
 
@@ -398,6 +401,284 @@ pub async fn save_note(
         })
     })
     .await
+}
+
+// ---------------------------------------------------------------------------------------------
+// M2: Logbuch
+// ---------------------------------------------------------------------------------------------
+
+impl AppState {
+    fn logbuch_konfig(&self) -> Vec<LogbuchFach> {
+        self.config.lock().unwrap().logbuch.clone()
+    }
+
+    fn ki_modell(&self) -> String {
+        ki::modell_oder_standard(&self.config.lock().unwrap().ki.modell)
+    }
+}
+
+/// Fach-Verzeichnis (Stundenplan + `01 Fächer/`); der Stundenplan wird außerhalb der Sperre gelesen.
+fn faecher_lesen(root: &Path, index: &SharedIndex) -> AppResult<Vec<FachInfo>> {
+    let (plan, _) = unterricht::load_stundenplan(root, &RetryPolicy::short());
+    with_index(index, |idx| Ok(unterricht::faecher(idx, plan.as_ref())))
+}
+
+#[tauri::command]
+pub async fn logbuch_einstellungen(state: State<'_, AppState>) -> Result<Vec<LogbuchFach>, AppError> {
+    let root = state.root()?;
+    let index = state.index.clone();
+    let konfig = state.logbuch_konfig();
+    blocking(move || Ok(logbuch::einstellungen_liste(&konfig, &faecher_lesen(&root, &index)?))).await
+}
+
+#[tauri::command]
+pub async fn logbuch_einstellungen_speichern(
+    state: State<'_, AppState>,
+    faecher: Vec<LogbuchFach>,
+) -> Result<Vec<LogbuchFach>, AppError> {
+    let geprueft = logbuch::pruefe_einstellungen(faecher)?;
+    {
+        let mut cfg = state.config.lock().unwrap();
+        let alt = std::mem::replace(&mut cfg.logbuch, geprueft);
+        if let Err(e) = config::save_to(&state.config_dir, &cfg) {
+            cfg.logbuch = alt;
+            return Err(e);
+        }
+    }
+    logbuch_einstellungen(state).await
+}
+
+#[tauri::command]
+pub async fn logbuch_uebersicht(state: State<'_, AppState>) -> Result<LogbuchUebersicht, AppError> {
+    let root = state.root()?;
+    let index = state.index.clone();
+    let konfig = state.logbuch_konfig();
+    blocking(move || {
+        let faecher = faecher_lesen(&root, &index)?;
+        with_index(&index, |idx| Ok(logbuch::uebersicht(idx, &konfig, &faecher)))
+    })
+    .await
+}
+
+/// Konfiguration eines **aktiven** Fachs, sein Linkziel und sein Name für die KI.
+fn aktives_fach(konfig: &[LogbuchFach], faecher: &[FachInfo], kurz: &str) -> AppResult<(LogbuchFach, String, String)> {
+    let f = logbuch::fach_konfig(konfig, kurz.trim());
+    if !f.aktiv {
+        return Err(AppError::InvalidInput(format!("Für {} ist kein Logbuch aktiv (Einstellungen → Logbuch).", f.kurz)));
+    }
+    let ziel = faecher
+        .iter()
+        .find(|x| x.kurz.eq_ignore_ascii_case(&f.kurz))
+        .map(|x| x.ziel.clone())
+        .unwrap_or_else(|| f.kurz.clone());
+    Ok((f, ziel.clone(), ziel))
+}
+
+/// Entwurf erzeugen – mit KI nur auf ausdrücklichen Klick (`mitKi`). Schreibt nichts.
+#[tauri::command]
+pub async fn logbuch_entwurf(state: State<'_, AppState>, req: LogbuchAnfrage) -> Result<LogbuchEntwurf, AppError> {
+    let root = state.root()?;
+    let index = state.index.clone();
+    let konfig = state.logbuch_konfig();
+    let config_dir = state.config_dir.clone();
+    let modell = state.ki_modell();
+    blocking(move || {
+        let faecher = faecher_lesen(&root, &index)?;
+        let (cfg, ziel, name) = aktives_fach(&konfig, &faecher, &req.fach)?;
+        // ohne KI bleibt alles lokal; mit KI nur, was gesendet werden darf (Regel 10)
+        let mit_privat = !req.mit_ki || req.privat_erlauben;
+        let (metas, klausuren): (Vec<NoteMeta>, Vec<String>) = with_index(&index, |idx| {
+            Ok((
+                logbuch::quellnotizen(idx, &cfg.kurz, &ziel, req.datum).into_iter().cloned().collect(),
+                logbuch::klausuren(idx, &cfg.kurz, &ziel, req.datum, mit_privat),
+            ))
+        })?;
+        let quellen = logbuch::quellen_lesen(&root, &metas)?;
+        if !req.mit_ki {
+            return logbuch::entwurf_erstellen(&cfg, &name, req.datum, &quellen, &klausuren, None, req.privat_erlauben);
+        }
+        let schluessel = ki::schluessel_laden()?.ok_or(AppError::KiKeinSchluessel)?;
+        let provider = ki::AnthropicProvider::new(schluessel, &modell)?;
+        let system = ki::prompt_logbuch(&config_dir);
+        let zugang = logbuch::KiZugang { provider: &provider, system: &system, verlauf_dir: Some(&config_dir) };
+        logbuch::entwurf_erstellen(&cfg, &name, req.datum, &quellen, &klausuren, Some(zugang), req.privat_erlauben)
+    })
+    .await
+}
+
+/// Vorschau des Moodle-Textes (ohne Zahl: `__/10`). Schreibt nichts.
+#[tauri::command]
+pub fn logbuch_text(state: State<'_, AppState>, req: LogbuchTextAnfrage) -> Result<String, AppError> {
+    let cfg = logbuch::fach_konfig(&state.logbuch_konfig(), req.fach.trim());
+    logbuch::render_text(&cfg, req.datum, &req.abschnitte, req.bewertung)
+}
+
+/// Geprüfte Notiz: Pfad auf der Platte, Fach, Datum.
+type GeprueftePfade = Vec<(RelPath, Option<String>, Option<NaiveDate>)>;
+
+/// Jeder Pfad muss eine indizierte Unterrichtsnotiz sein (optional: dieses Fachs und Tages).
+fn pruefe_pfade(index: &SharedIndex, pfade: &[RelPath], fach_tag: Option<(&str, &str, NaiveDate)>) -> AppResult<GeprueftePfade> {
+    if pfade.is_empty() {
+        return Err(AppError::InvalidInput("Keine Notiz angegeben.".into()));
+    }
+    with_index(index, |idx| {
+        let mut out = Vec::new();
+        for p in pfade {
+            let m = idx
+                .get(p)
+                .or_else(|| idx.notes().find(|m| m.path.eq_ignore_ascii_case(p)))
+                .filter(|m| unterricht::is_unterricht_note(m))
+                .ok_or_else(|| AppError::InvalidInput(format!("„{p}“ ist keine Unterrichtsnotiz im Vault.")))?;
+            if let Some((kurz, ziel, datum)) = fach_tag {
+                if !unterricht::fach_matches(m, kurz, ziel) || m.datum != Some(datum) {
+                    return Err(AppError::InvalidInput(format!(
+                        "„{}“ gehört nicht zu {kurz} am {}.",
+                        m.title,
+                        datum.format("%d.%m.%Y")
+                    )));
+                }
+            }
+            out.push((m.path.clone(), m.fach.clone(), m.datum));
+        }
+        Ok(out)
+    })
+}
+
+/// Die Teile des App-Zustands, die ein Statuswechsel braucht.
+struct StatusZiel {
+    index: SharedIndex,
+    root: PathBuf,
+    writes: Arc<SelfWrites>,
+    lock: Arc<Mutex<()>>,
+    config_dir: PathBuf,
+}
+
+impl StatusZiel {
+    fn von(state: &AppState, root: PathBuf) -> Self {
+        StatusZiel {
+            index: state.index.clone(),
+            root,
+            writes: state.writes.clone(),
+            lock: state.write_lock.clone(),
+            config_dir: state.config_dir.clone(),
+        }
+    }
+
+    /// Status schreiben (unter der globalen Schreibsperre) und sofort in den Index übernehmen.
+    fn schreiben(&self, app: &AppHandle, pfade: &[RelPath], status: LogbuchStatus, nur_hoeher: bool) -> LogbuchStatusReport {
+        let _schreibsperre = self.lock.lock().unwrap_or_else(|e| e.into_inner());
+        let backups = self.config_dir.join("backups");
+        let report =
+            logbuch::status_setzen(&self.root, pfade, status, nur_hoeher, &self.writes, Some(&backups), &RetryPolicy::write());
+        for w in &report.geschrieben {
+            index_own_write(app, &self.index, &self.root, &w.rel_path);
+        }
+        report
+    }
+}
+
+/// „Kopieren und Moodle öffnen“: Text rendern (Regel 2), in die Zwischenablage, Moodle im Browser,
+/// Status `kopiert`. Der Text wird danach verworfen – nirgends gespeichert (Regel 1).
+#[tauri::command]
+pub async fn logbuch_kopieren(app: AppHandle, state: State<'_, AppState>, req: LogbuchKopieren) -> Result<LogbuchKopiert, AppError> {
+    let root = state.root()?;
+    ensure_write_allowed(&root)?;
+    let konfig = state.logbuch_konfig();
+    let ziel_status = StatusZiel::von(&state, root);
+    blocking(move || {
+        let faecher = faecher_lesen(&ziel_status.root, &ziel_status.index)?;
+        let (cfg, ziel, _) = aktives_fach(&konfig, &faecher, &req.fach)?;
+        let text = logbuch::kopiertext(&cfg, req.datum, &req.abschnitte, req.bewertung)?;
+        let pfade: Vec<RelPath> = pruefe_pfade(&ziel_status.index, &req.pfade, Some((&cfg.kurz, &ziel, req.datum)))?
+            .into_iter()
+            .map(|(p, _, _)| p)
+            .collect();
+        app.clipboard()
+            .write_text(logbuch::fuer_zwischenablage(&text))
+            .map_err(|e| AppError::Zwischenablage(e.to_string()))?;
+        drop(text);
+        let url = logbuch::moodle_url(&cfg);
+        let moodle_fehler =
+            app.opener().open_url(url.clone(), None::<&str>).err().map(|e| format!("Moodle ließ sich nicht öffnen: {e}"));
+        let status = ziel_status.schreiben(&app, &pfade, LogbuchStatus::Kopiert, true);
+        if let Err(e) = logbuch::verlauf_anhaengen(&ziel_status.config_dir, &cfg.kurz, req.datum, LogbuchStatus::Kopiert) {
+            eprintln!("[logbuch] Verlauf nicht geschrieben: {e}");
+        }
+        Ok(LogbuchKopiert { moodle_url: url, moodle_geoeffnet: moodle_fehler.is_none(), moodle_fehler, status })
+    })
+    .await
+}
+
+/// Status von Hand setzen (z. B. `abgegeben`).
+#[tauri::command]
+pub async fn logbuch_status_setzen(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    pfade: Vec<RelPath>,
+    status: LogbuchStatus,
+) -> Result<LogbuchStatusReport, AppError> {
+    let root = state.root()?;
+    ensure_write_allowed(&root)?;
+    let ziel_status = StatusZiel::von(&state, root);
+    blocking(move || {
+        let geprueft = pruefe_pfade(&ziel_status.index, &pfade, None)?;
+        let liste: Vec<RelPath> = geprueft.iter().map(|(p, _, _)| p.clone()).collect();
+        let report = ziel_status.schreiben(&app, &liste, status, false);
+        // Verlauf: je Fach und Tag eine Zeile, wenn sich dort etwas geändert hat
+        let mut gemeldet: Vec<(String, NaiveDate)> = Vec::new();
+        for (p, fach, datum) in &geprueft {
+            let (Some(f), Some(d)) = (fach, datum) else { continue };
+            let geaendert = report.geschrieben.iter().any(|w| w.rel_path.eq_ignore_ascii_case(p));
+            if geaendert && !gemeldet.iter().any(|(gf, gd)| gf == f && gd == d) {
+                gemeldet.push((f.clone(), *d));
+                if let Err(e) = logbuch::verlauf_anhaengen(&ziel_status.config_dir, f, *d, status) {
+                    eprintln!("[logbuch] Verlauf nicht geschrieben: {e}");
+                }
+            }
+        }
+        Ok(report)
+    })
+    .await
+}
+
+fn ki_status_jetzt(state: &AppState) -> KiStatus {
+    let (gespeichert, fehler) = match ki::schluessel_laden() {
+        Ok(s) => (s.is_some(), None),
+        Err(e) => (false, Some(e.to_string())),
+    };
+    KiStatus { schluessel_gespeichert: gespeichert, modell: state.ki_modell(), modelle: ki::modelle(), fehler }
+}
+
+#[tauri::command]
+pub async fn ki_status(state: State<'_, AppState>) -> Result<KiStatus, AppError> {
+    Ok(ki_status_jetzt(&state))
+}
+
+/// Schlüssel in den Windows-Anmeldeinformationsspeicher. Er geht nie an die Oberfläche zurück.
+#[tauri::command]
+pub async fn ki_schluessel_speichern(state: State<'_, AppState>, schluessel: String) -> Result<KiStatus, AppError> {
+    ki::schluessel_speichern(&schluessel)?;
+    Ok(ki_status_jetzt(&state))
+}
+
+#[tauri::command]
+pub async fn ki_schluessel_loeschen(state: State<'_, AppState>) -> Result<KiStatus, AppError> {
+    ki::schluessel_loeschen()?;
+    Ok(ki_status_jetzt(&state))
+}
+
+#[tauri::command]
+pub async fn ki_modell_setzen(state: State<'_, AppState>, modell: String) -> Result<KiStatus, AppError> {
+    let modell = modell.trim().to_string();
+    if !ki::modelle().iter().any(|m| m.id == modell) {
+        return Err(AppError::InvalidInput(format!("Unbekanntes Modell „{modell}“.")));
+    }
+    {
+        let mut cfg = state.config.lock().unwrap();
+        cfg.ki.modell = modell;
+        config::save_to(&state.config_dir, &cfg)?;
+    }
+    Ok(ki_status_jetzt(&state))
 }
 
 #[cfg(test)]

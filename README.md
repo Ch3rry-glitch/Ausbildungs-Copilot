@@ -4,10 +4,30 @@ Windows-App für Auszubildende (Kaufmann/-frau im E-Commerce): eine zweite, schn
 den eigenen **Obsidian-Lernvault**. Unterrichtsnotizen, Aufgaben, Berichtsheft und – das Kernstück –
 Logbucheinträge für Moodle. Der Vault bleibt die einzige Wahrheit; Obsidian funktioniert parallel weiter.
 
-> **Stand: M1 (Unterricht + Heute).** Startseite „Heute“ mit Stundenplan-Blöcken und fälligen Aufgaben,
-> Unterrichtsnotiz aus der Vorlage anlegen (Strg+N), Notizen im Editor bearbeiten und speichern (Strg+S) mit
-> Konfliktschutz gegenüber Obsidian. Die App legt nur neue Notizen an und speichert geöffnete – sie löscht,
-> verschiebt und benennt nichts um.
+> **Stand: M2 (Logbuch).** Startseite „Heute“ mit Stundenplan-Blöcken, fälligen Aufgaben und offenen
+> Logbucheinträgen, Unterrichtsnotiz aus der Vorlage anlegen (Strg+N), Notizen im Editor bearbeiten und
+> speichern (Strg+S) mit Konfliktschutz gegenüber Obsidian. **Logbuch:** Eintrag für Moodle aus den
+> Unterrichtsnotizen eines Tages erzeugen (mit oder ohne KI), bearbeiten, Bewertung selbst eintragen,
+> „Kopieren und Moodle öffnen“ (Strg+L aus der Notiz). Die App legt nur neue Notizen an, speichert geöffnete
+> und setzt im Logbuch nur das Feld `logbuch: offen | kopiert | abgegeben` – sie löscht, verschiebt und
+> benennt nichts um.
+
+## Logbuch und KI-Schlüssel
+
+- **Ohne KI-Schlüssel** funktioniert alles: „Ohne KI befüllen“ übernimmt Inhalt, Merksätze, Begriffe,
+  `#frage`-Zeilen und offene Aufgaben wörtlich in die Abschnitte des Fachs.
+- **Mit KI** (Anthropic): unter *Einstellungen → KI* einen API-Schlüssel (`sk-ant-…`, erstellt auf
+  [platform.claude.com](https://platform.claude.com)) eintragen. Er liegt im
+  **Windows-Anmeldeinformationsspeicher** (Eintrag `ausbildungs-cockpit`), nie in einer Datei, und wird nie
+  wieder angezeigt. Die KI läuft nur auf Klick; vorher steht da, welche Notizen gesendet werden.
+  EK-Angaben werden vorher entfernt, `10 Privat/` bleibt draußen (nur pro Vorgang einschaltbar).
+  Kosten und Tokens je Aufruf stehen in `%APPDATA%\ausbildungs-cockpit\ki-verlauf.jsonl` (ohne Text).
+- Der Prompt liegt in `prompts/logbuch.md` (im Programm eingebaut). Eine eigene Fassung unter
+  `%APPDATA%\ausbildungs-cockpit\prompts\logbuch.md` hat Vorrang – ohne Neukompilieren.
+- Welche Fächer ein Logbuch haben, ihre Moodle-Adresse, Abschnitte, Bewertungsskala und „Offen zählen ab“
+  stehen unter *Einstellungen → Logbuch je Fach* (Voreinstellung: GEC mit Bewertung 1–10).
+- Der Eintragstext wird **nirgends** gespeichert – nur in der Zwischenablage. Im App-Datenordner liegt
+  lediglich ein Verlauf „Fach · Datum · Status · Zeitpunkt“ (`logbuch-verlauf.jsonl`).
 
 ## Installation (für Mitschüler)
 
@@ -78,10 +98,13 @@ src-tauri/src/
   write.rs                einziger Schreibweg: atomar, Konfliktschutz per SHA-256, nie überschreiben
   unterricht.rs           Unterrichtsnotiz aus der Vorlage, Fächer, Lernfelder
   heute.rs                Tagesansicht: Blöcke, Notizen, fällige Aufgaben
+  logbuch.rs              Logbuch: Inhalt aus der Notiz, Text für Moodle, Status `logbuch:`, Übersicht
+  ki.rs                   KI hinter `LlmProvider` (Anthropic), Schlüssel via keyring, Antwort prüfen
   starter.rs              Starter-Vault anlegen, nie überschreiben
   obsidian.rs             obsidian://-Links
   config.rs               Einstellungen in %APPDATA%\ausbildungs-cockpit
   commands.rs             Tauri-Befehle
+prompts/                  KI-Prompts (ohne Neukompilieren anpassbar)
 src-tauri/tests/          Tests gegen fixtures/vault
 fixtures/vault/           Testvault mit absichtlich unsauberem Altbestand
 ```
