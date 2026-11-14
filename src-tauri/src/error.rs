@@ -18,6 +18,23 @@ pub enum AppError {
     Watch(String),
     #[error("{0}")]
     Other(String),
+    /// `read_note`: Datei nicht (mehr) vorhanden
+    #[error("Die Notiz „{0}“ wurde nicht gefunden.")]
+    NoteNotFound(String),
+    #[error("Die Vorlage „{0}“ fehlt im Vault. Ohne Vorlage legt die App keine Unterrichtsnotiz an.")]
+    TemplateMissing(String),
+    #[error("„{0}“ ließ sich nicht speichern – die Datei ist gerade gesperrt (Obsidian oder Cloud-Sync) oder nicht beschreibbar. Dein Text ist nicht verloren – bitte gleich noch einmal speichern.")]
+    Locked(String),
+    #[error("„{0}“ ist schreibgeschützt. Entferne den Schreibschutz (Datei-Eigenschaften) und speichere dann erneut. Dein Text ist nicht verloren.")]
+    ReadOnly(String),
+    #[error("„{0}“ ist keine gültige UTF-8-Datei und wird nur angezeigt, nicht gespeichert.")]
+    NotEditable(String),
+    #[error("Das Fach „{0}“ steht weder im Stundenplan noch in „01 Fächer/“.")]
+    UnknownFach(String),
+    #[error("{0}")]
+    InvalidInput(String),
+    #[error("Entwicklungs-Build: Schreiben ist nur in einer Vault-Kopie unter %TEMP% erlaubt (oder COCKPIT_DEV_WRITE=1 setzen).")]
+    DevWriteBlocked,
 }
 
 impl Serialize for AppError {

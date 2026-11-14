@@ -130,6 +130,16 @@ impl NoteText {
         true
     }
 
+    /// Steht der Schlüssel in der Frontmatter (gleiche Erkennung wie beim Setzen)?
+    pub fn has_key(&self, key: &str) -> bool {
+        self.find_key(key).is_some()
+    }
+
+    /// Ersetzt den Text nach der Frontmatter (Vorlage ausfüllen). Frontmatter bleibt unberührt.
+    pub fn set_body(&mut self, body: String) {
+        self.body = body;
+    }
+
     fn find_key(&self, key: &str) -> Option<usize> {
         self.yaml_lines.iter().position(|l| {
             let c = strip_eol(l);
@@ -192,16 +202,29 @@ fn unquote(s: &str) -> &str {
 
 /// Macht aus einem beliebigen Text einen sicheren YAML-Skalar (Anführungszeichen nur, wenn nötig).
 pub fn yaml_scalar(s: &str) -> String {
-    const RESERVED: [&str; 9] = ["true", "false", "null", "yes", "no", "on", "off", "~", ""];
-    let needs_quotes = RESERVED.contains(&s.to_ascii_lowercase().as_str())
-        || s.starts_with(|c: char| "[]{}>|*&!%@#`'\",?:-".contains(c) || c.is_whitespace())
+    const RESERVED: [&str; 13] =
+        ["true", "false", "null", "yes", "no", "on", "off", "~", "", ".inf", "-.inf", "+.inf", ".nan"];
+    let lower = s.to_ascii_lowercase();
+    let needs_quotes = RESERVED.contains(&lower.as_str())
+        || s.starts_with(|c: char| "[]{}>|*&!%@#`'\",?:-=".contains(c) || c.is_whitespace())
         || s.ends_with(char::is_whitespace)
+        || s.ends_with(':')
         || s.contains(": ")
         || s.contains(" #")
-        || s.contains('\n')
+        || s.contains(['\n', '\t', '\r'])
+        || lower.starts_with("0x")
+        || lower.starts_with("0o")
+        || lower.starts_with("0b")
         || s.parse::<f64>().is_ok();
     if needs_quotes {
-        format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n"))
+        format!(
+            "\"{}\"",
+            s.replace('\\', "\\\\")
+                .replace('"', "\\\"")
+                .replace('\n', "\\n")
+                .replace('\t', "\\t")
+                .replace('\r', "\\r")
+        )
     } else {
         s.to_string()
     }
@@ -379,6 +402,48 @@ mod tests {
         assert_eq!(yaml_scalar("Thema: Teil 2"), "\"Thema: Teil 2\"");
         assert_eq!(yaml_scalar("2"), "\"2\"");
         assert_eq!(yaml_scalar("no"), "\"no\"");
+    }
+
+    #[test]
+    fn yaml_scalar_neue_faelle() {
+        for s in ["Teil 1:", "a\tb", ".inf", "-.INF", ".NaN", "0x1F", "0o17", "0b101", "=x", "a\rb"] {
+            let q = yaml_scalar(s);
+            assert!(q.starts_with('"') && q.ends_with('"'), "{s:?} → {q}");
+            let back: String = serde_yaml::from_str(&q).unwrap();
+            assert_eq!(back, s);
+        }
+        assert_eq!(yaml_scalar("a\tb"), "\"a\\tb\"");
+        for s in [
+            "Größenvorteile über Ökonomie",
+            "Kalkulation – Übung",
+            "#x",
+            "[[a|b]]",
+            "Kalkulation: Teil 2",
+            "\"q\"",
+            "Kosten $1 \\1",
+            "x: y # z",
+            "Kalkulation",
+        ] {
+            let q = yaml_scalar(s);
+            let back: String = serde_yaml::from_str(&format!("k: {q}"))
+                .map(|m: std::collections::BTreeMap<String, String>| m["k"].clone())
+                .unwrap_or_else(|e| panic!("{s:?} → {q}: {e}"));
+            assert_eq!(back, s, "{q}");
+        }
+        // bisherige Erwartungen bleiben
+        assert_eq!(yaml_scalar("Kalkulation"), "Kalkulation");
+        assert_eq!(yaml_scalar("HEIN"), "HEIN");
+    }
+
+    #[test]
+    fn has_key() {
+        let n = NoteText::parse("---\nkw_alt: 1\nthema: \nlernfeld:\n---\n");
+        assert!(n.has_key("kw_alt"));
+        assert!(!n.has_key("kw"));
+        assert!(n.has_key("thema"));
+        assert!(n.has_key("lernfeld"));
+        assert!(!n.has_key("datum"));
+        assert!(!NoteText::parse("kein Frontmatter\nthema: x\n").has_key("thema"));
     }
 
     #[test]

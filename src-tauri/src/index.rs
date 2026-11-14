@@ -12,6 +12,28 @@ use crate::guard;
 use crate::model::{FolderInfo, NoteMeta, NoteSummary, RelPath, VaultChanged};
 use crate::vault::scan;
 
+/// Metadaten einer Notiz von der Platte lesen – **ohne** Index-Sperre. Gesperrte Dateien
+/// (Obsidian schreibt gerade, Cloud-Sync) werden kurz wiederholt statt aufzugeben (SPEC §9);
+/// nach dem letzten Versuch wird nicht mehr gewartet.
+pub fn read_meta(root: &Path, rel: &str) -> AppResult<NoteMeta> {
+    const ATTEMPTS: u64 = 4;
+    let mut attempt = 0;
+    loop {
+        match scan::read_note(root, rel) {
+            Ok((meta, _)) => return Ok(meta),
+            Err(AppError::Io(e)) if e.kind() == std::io::ErrorKind::NotFound => return Err(AppError::Io(e)),
+            Err(AppError::Io(e)) => {
+                attempt += 1;
+                if attempt >= ATTEMPTS {
+                    return Err(AppError::Io(e));
+                }
+                thread::sleep(Duration::from_millis(50 * attempt));
+            }
+            Err(e) => return Err(e),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct VaultIndex {
     root: PathBuf,
@@ -53,33 +75,45 @@ impl VaultIndex {
         self.notes.values()
     }
 
-    /// Notiz (neu) einlesen. Gesperrte Dateien (Obsidian schreibt gerade, Cloud-Sync) werden
-    /// kurz wiederholt statt aufzugeben (SPEC §9).
+    /// Notiz (neu) einlesen (für den Wächter): [`read_meta`] + [`VaultIndex::insert_meta`].
     pub fn upsert(&mut self, rel: &str) -> AppResult<()> {
-        let mut last_err = None;
-        for attempt in 0..4 {
-            match scan::read_note(&self.root, rel) {
-                Ok((meta, _)) => {
-                    let mut folder = meta.folder.clone();
-                    while !folder.is_empty() {
-                        self.folders.insert(folder.clone());
-                        folder = scan::parent_folder(&folder);
-                    }
-                    self.notes.insert(rel.to_string(), meta);
-                    return Ok(());
-                }
-                Err(AppError::Io(e)) if e.kind() == std::io::ErrorKind::NotFound => {
-                    self.notes.remove(rel);
-                    return Err(AppError::Io(e));
-                }
-                Err(AppError::Io(e)) => {
-                    last_err = Some(AppError::Io(e));
-                    thread::sleep(Duration::from_millis(50 * (attempt + 1)));
-                }
-                Err(e) => return Err(e),
+        match read_meta(&self.root, rel) {
+            Ok(meta) => {
+                self.insert_meta(meta);
+                Ok(())
             }
+            Err(AppError::Io(e)) if e.kind() == std::io::ErrorKind::NotFound => {
+                self.notes.remove(rel);
+                Err(AppError::Io(e))
+            }
+            Err(e) => Err(e),
         }
-        Err(last_err.unwrap_or_else(|| AppError::Other("unbekannter Lesefehler".into())))
+    }
+
+    /// Fertige Metadaten eintragen (nur Speicher, keine Platte); Ordner darüber werden ergänzt.
+    pub fn insert_meta(&mut self, meta: NoteMeta) {
+        let mut folder = meta.folder.clone();
+        while !folder.is_empty() {
+            self.folders.insert(folder.clone());
+            folder = scan::parent_folder(&folder);
+        }
+        self.notes.insert(meta.path.clone(), meta);
+    }
+
+    /// Ordner bekannt machen, bevor die App sie anlegt – so löst ihr Ereignis keinen Vollscan aus.
+    pub fn add_folders(&mut self, folders: &[RelPath]) {
+        self.folders.extend(folders.iter().cloned());
+    }
+
+    pub fn remove_folders(&mut self, folders: &[RelPath]) {
+        for f in folders {
+            self.folders.remove(f);
+        }
+    }
+
+    /// Alle bekannten Ordner (ohne Wurzel).
+    pub fn folder_paths(&self) -> Vec<RelPath> {
+        self.folders.iter().cloned().collect()
     }
 
     pub fn remove(&mut self, rel: &str) -> bool {
@@ -122,6 +156,7 @@ impl VaultIndex {
         Ok(VaultChanged {
             changed: changed.into_iter().collect(),
             removed: removed.into_iter().collect(),
+            own: Vec::new(),
             full_rescan: full,
         })
     }

@@ -3,7 +3,16 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { api, errorText, type AppStatus } from "../api";
 import { Icon } from "../icons";
 
-export function SettingsView({ status, onStatus }: { status: AppStatus; onStatus: (s: AppStatus) => void }) {
+export function SettingsView({
+  status,
+  onStatus,
+  editorDirty,
+}: {
+  status: AppStatus;
+  onStatus: (s: AppStatus) => void;
+  /** offene Notiz mit ungespeicherten Änderungen → Vault-Knöpfe gesperrt */
+  editorDirty: boolean;
+}) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
@@ -49,13 +58,14 @@ export function SettingsView({ status, onStatus }: { status: AppStatus; onStatus
           </dl>
         </div>
         <div className="row">
-          <button className="btn" onClick={changeVault} disabled={busy}>
+          <button className="btn" onClick={changeVault} disabled={busy || editorDirty}>
             {Icon.ordnerOeffnen} Vault wechseln
           </button>
-          <button className="btn" onClick={() => run(api.reindex, "Neu eingelesen – {n} Notizen.")} disabled={busy}>
+          <button className="btn" onClick={() => run(api.reindex, "Neu eingelesen – {n} Notizen.")} disabled={busy || editorDirty}>
             {Icon.refresh} Neu einlesen
           </button>
         </div>
+        {editorDirty && <div className="hint">Erst die offene Notiz speichern.</div>}
         {msg && <div className={msg.ok ? "result" : "error"}>{msg.text}</div>}
         <div>
           <h2>App</h2>

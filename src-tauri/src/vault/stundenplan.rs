@@ -1,31 +1,47 @@
 //! Stundenplan aus `00 Start/Stundenplan.md` lesen – die App dupliziert ihn nie.
 //!
-//! Format: je Schultag eine Überschrift `## Montag` … `## Freitag`, darunter eine Tabelle mit
-//! den Spalten `Std.`, `Zeit`, `Fach`, `Lehrkraft` (Reihenfolge egal). Zeilen ohne Stunde
-//! (z. B. `*Pause*`) und ohne Fach werden übersprungen. Tage ohne Tabelle sind Betriebstage.
+//! Zwei Formate, beide überall in der Datei:
+//!
+//! * **Tagesabschnitte:** je Schultag eine Überschrift `## Montag` … `## Freitag`, darunter eine
+//!   Tabelle mit den Spalten `Std.`, `Zeit`, `Fach`, `Lehrkraft` (Reihenfolge egal).
+//! * **Matrix** (SPEC §2): eine Tabelle `| Std. | Zeit | Montag | Donnerstag |` – Spalte `Std.`,
+//!   **keine** Spalte `Fach`, mindestens eine Spalte mit einem Wochentag als Kopf.
+//!
+//! Hat ein Wochentag Stunden aus einem Tagesabschnitt, gilt nur der Abschnitt. Zeilen ohne
+//! Stunde (z. B. `*Pause*`) und ohne Fach werden übersprungen. Tage ohne Stunden sind Betriebstage.
 
-use super::links::parse_link_inner;
-use crate::model::{Block, Schultag, Stunde, Stundenplan, Wochentag};
+use super::links::{parse_link_inner, parse_links};
+use crate::model::{Block, Fach, Schultag, Stunde, Stundenplan, Wochentag};
 
 pub const STUNDENPLAN_PATH: &str = "00 Start/Stundenplan.md";
 
+/// Welche Art Tabelle gerade gelesen wird.
+enum Table {
+    /// Kopfzeile noch nicht gesehen
+    Start,
+    Tag(Wochentag, Columns),
+    Matrix(MatrixColumns),
+    /// irgendeine andere Tabelle – wird ignoriert
+    Andere,
+}
+
 pub fn parse_stundenplan(body: &str) -> Stundenplan {
     let mut tage: Vec<Schultag> = Vec::new();
+    let mut matrix: Vec<Schultag> = Vec::new();
     let mut current: Option<Wochentag> = None;
-    let mut header: Option<Columns> = None;
+    let mut table = Table::Start;
 
     for line in body.lines() {
         let t = line.trim();
         if let Some(h) = t.strip_prefix('#') {
             let title = h.trim_start_matches('#').trim();
             current = Wochentag::from_name(title);
-            header = None;
+            table = Table::Start;
             continue;
         }
-        let Some(tag) = current else { continue };
         if !t.starts_with('|') {
             if !t.is_empty() {
-                header = None; // Tabelle zu Ende
+                table = Table::Start; // Tabelle zu Ende
             }
             continue;
         }
@@ -33,22 +49,129 @@ pub fn parse_stundenplan(body: &str) -> Stundenplan {
         if cells.iter().all(|c| c.chars().all(|ch| matches!(ch, '-' | ':' | ' '))) {
             continue; // Trennzeile |---|---|
         }
-        let Some(cols) = &header else {
-            header = Columns::from_header(&cells);
-            continue;
-        };
-        if let Some(stunde) = cols.row(&cells) {
-            match tage.iter_mut().find(|d| d.tag == tag) {
-                Some(day) => day.stunden.push(stunde),
-                None => tage.push(Schultag { tag, stunden: vec![stunde] }),
+        match &table {
+            Table::Start => {
+                table = if let Some(m) = MatrixColumns::from_header(&cells) {
+                    Table::Matrix(m)
+                } else {
+                    match (current, Columns::from_header(&cells)) {
+                        (Some(tag), Some(cols)) => Table::Tag(tag, cols),
+                        // M0-Verhalten: unter einer Tagesüberschrift zählt die erste passende Kopfzeile
+                        (Some(_), None) => Table::Start,
+                        (None, _) => Table::Andere,
+                    }
+                };
             }
+            Table::Tag(tag, cols) => {
+                if let Some(stunde) = cols.row(&cells) {
+                    push_stunde(&mut tage, *tag, stunde, false);
+                }
+            }
+            Table::Matrix(m) => {
+                for (tag, stunde) in m.row(&cells) {
+                    push_stunde(&mut matrix, tag, stunde, true);
+                }
+            }
+            Table::Andere => {}
+        }
+    }
+    // Vorrang: ein Tag mit Stunden aus „## <Tag>“ ignoriert die Matrix
+    for day in matrix {
+        if !tage.iter().any(|d| d.tag == day.tag && !d.stunden.is_empty()) {
+            tage.push(day);
         }
     }
     for d in &mut tage {
         d.stunden.sort_by_key(|s| s.nr);
     }
     tage.sort_by_key(|d| d.tag);
-    Stundenplan { tage }
+    Stundenplan { tage, fach_links: fach_links(body) }
+}
+
+/// Fügt eine Stunde an. `dedupe`: bei doppeltem (Tag, Nr.) gewinnt die erste (mehrere Matrizen).
+fn push_stunde(tage: &mut Vec<Schultag>, tag: Wochentag, stunde: Stunde, dedupe: bool) {
+    match tage.iter_mut().find(|d| d.tag == tag) {
+        Some(day) => {
+            if !(dedupe && day.stunden.iter().any(|s| s.nr == stunde.nr)) {
+                day.stunden.push(stunde);
+            }
+        }
+        None => tage.push(Schultag { tag, stunden: vec![stunde] }),
+    }
+}
+
+/// Alle Wikilinks mit Alias in der Datei (auch `\|` in Tabellen): Alias → volles Ziel.
+/// Der erste Link je Kürzel gewinnt.
+pub fn fach_links(body: &str) -> Vec<Fach> {
+    let lehrkraefte = lehrkraefte_aus_tabellen(body);
+    let mut out: Vec<Fach> = Vec::new();
+    for l in parse_links(body, 0) {
+        let Some(alias) = l.alias else { continue };
+        if l.embed || l.target.is_empty() || out.iter().any(|f| f.kurz.eq_ignore_ascii_case(&alias)) {
+            continue;
+        }
+        let lehrkraft =
+            lehrkraefte.iter().find(|(k, _)| k.eq_ignore_ascii_case(&alias)).map(|(_, l)| l.clone());
+        out.push(Fach { kurz: alias, ziel: l.target, lehrkraft });
+    }
+    out
+}
+
+/// Lehrkraft je Fach aus Tabellen **außerhalb** des Stundenplans (z. B. „## Lehrkräfte“), damit
+/// auch die Matrix (ohne Lehrkraft-Spalte) eine Lehrkraft liefert (SPEC §6.2):
+///
+/// * Spalte `Lehrkraft`/`Lehrer` → deren Zelle (`| GEC | … | HEIN | [[GEC – …\|GEC]] |`)
+/// * sonst Spalte `Kürzel`, wenn der Fachlink in einer anderen Spalte steht und das Kürzel nicht
+///   das Fach selbst ist (`| HEIN | | [[GEC – …\|GEC]] |`)
+///
+/// Nur Zeilen mit genau einem Alias-Link; Platzhalter (`—`, leer) zählen nicht. Erster Treffer gewinnt.
+fn lehrkraefte_aus_tabellen(body: &str) -> Vec<(String, String)> {
+    let norm = |c: &str| c.trim().trim_matches('*').trim().trim_end_matches('.').to_lowercase();
+    let mut out: Vec<(String, String)> = Vec::new();
+    // (Lehrkraft-Spalte, Kürzel-Spalte) der aktuellen Tabelle; None = keine/fremde Tabelle
+    let mut header: Option<Option<(Option<usize>, Option<usize>)>> = None;
+    for line in body.lines() {
+        let t = line.trim();
+        if !t.starts_with('|') {
+            header = None;
+            continue;
+        }
+        let cells = split_row(t);
+        if cells.iter().all(|c| c.chars().all(|ch| matches!(ch, '-' | ':' | ' '))) {
+            continue;
+        }
+        let Some(cols) = header else {
+            let find = |names: &[&str]| cells.iter().position(|c| names.contains(&norm(c).as_str()));
+            let stundenplan = find(&["std", "stunde"]).is_some();
+            let lk = find(&["lehrkraft", "lehrer"]);
+            let kz = find(&["kürzel", "kuerzel"]);
+            header = Some((!stundenplan && (lk.is_some() || kz.is_some())).then_some((lk, kz)));
+            continue;
+        };
+        let Some((lk, kz)) = cols else { continue };
+        let links: Vec<(usize, String)> = cells
+            .iter()
+            .enumerate()
+            .flat_map(|(i, c)| parse_links(c, 0).into_iter().filter(|l| !l.embed).filter_map(move |l| Some((i, l.alias?))))
+            .collect();
+        let [(link_col, alias)] = links.as_slice() else { continue };
+        let get = |i: usize| cells.get(i).map(|s| s.trim().trim_matches('*').trim()).unwrap_or("");
+        let lehrkraft = match (lk, kz) {
+            (Some(i), _) if i != *link_col => get(i),
+            (None, Some(i)) if i != *link_col && !get(i).eq_ignore_ascii_case(alias) => get(i),
+            _ => continue,
+        };
+        if ist_platzhalter(lehrkraft) || out.iter().any(|(k, _)| k.eq_ignore_ascii_case(alias)) {
+            continue;
+        }
+        out.push((alias.clone(), lehrkraft.to_string()));
+    }
+    out
+}
+
+/// `—`, `–`, `-` und leer (nach Trimmen und ohne `*`) bedeuten: keine Lehrkraft / frei.
+pub fn ist_platzhalter(s: &str) -> bool {
+    matches!(s.trim().trim_matches('*').trim(), "" | "—" | "–" | "-")
 }
 
 impl Stundenplan {
@@ -131,8 +254,48 @@ impl Columns {
             zeit: opt(self.zeit).unwrap_or_default(),
             fach,
             fach_ziel,
-            lehrkraft: opt(self.lehrkraft),
+            lehrkraft: opt(self.lehrkraft).filter(|l| !ist_platzhalter(l)),
         })
+    }
+}
+
+/// Spalten einer Matrix-Tabelle: `Std.`, optional `Zeit`, je Wochentag eine Spalte.
+struct MatrixColumns {
+    nr: usize,
+    zeit: Option<usize>,
+    tage: Vec<(usize, Wochentag)>,
+}
+
+impl MatrixColumns {
+    fn from_header(cells: &[String]) -> Option<Self> {
+        let norm = |c: &str| c.trim().trim_matches('*').trim().to_lowercase();
+        let find = |names: &[&str]| cells.iter().position(|c| names.iter().any(|n| norm(c).trim_end_matches('.') == *n));
+        let nr = find(&["std", "stunde"])?;
+        if find(&["fach"]).is_some() {
+            return None;
+        }
+        let tage: Vec<(usize, Wochentag)> = cells
+            .iter()
+            .enumerate()
+            .filter_map(|(i, c)| Wochentag::from_name(c.trim().trim_matches('*')).map(|w| (i, w)))
+            .collect();
+        if tage.is_empty() {
+            return None;
+        }
+        Some(MatrixColumns { nr, zeit: find(&["zeit"]), tage })
+    }
+
+    fn row(&self, cells: &[String]) -> Vec<(Wochentag, Stunde)> {
+        let get = |i: usize| cells.get(i).map(|s| s.trim()).unwrap_or("");
+        let Ok(nr) = get(self.nr).trim_matches('*').trim().parse::<u8>() else { return Vec::new() };
+        let zeit = self.zeit.map(get).unwrap_or("").to_string();
+        self.tage
+            .iter()
+            .filter_map(|(i, tag)| {
+                let (fach, fach_ziel) = fach_aus_zelle(get(*i))?;
+                Some((*tag, Stunde { nr, zeit: zeit.clone(), fach, fach_ziel, lehrkraft: None }))
+            })
+            .collect()
     }
 }
 
@@ -223,6 +386,109 @@ mod tests {
         let md = "## Donnerstag\n| Fach | Std | Lehrkraft |\n|--|--|--|\n| [[PG – Politik\\|PG]] | 7 | Rothaus |\n";
         let s = &parse_stundenplan(md).tage[0].stunden[0];
         assert_eq!((s.nr, s.fach.as_str(), s.lehrkraft.as_deref()), (7, "PG", Some("Rothaus")));
+    }
+
+    /// Die Tabelle aus SPEC §2, wörtlich.
+    const SPEC_MATRIX: &str = "| Std. | Zeit | Montag | Donnerstag |\n\
+                                          |---:|---|---|---|\n\
+                                          | 2 | 08:35–09:20 | GEC | KSK |\n\
+                                          | 3 | 09:35–10:20 | D-DV | WSP |\n\
+                                          | 4 | 10:20–11:05 | D-DV | E |\n\
+                                          | 5 | 11:20–12:05 | WSP | GEC |\n\
+                                          | 6 | 12:05–12:50 | GEC | GEC |\n\
+                                          | 7 | 13:05–13:50 | GEC | PG |\n\
+                                          | 8 | 13:50–14:35 | D | — |\n";
+
+    #[test]
+    fn matrix_wie_spec() {
+        let plan = parse_stundenplan(SPEC_MATRIX);
+        let mo = plan.tag(Wochentag::Montag).unwrap().bloecke();
+        let got: Vec<(&str, u8, u8, &str, &str)> = mo
+            .iter()
+            .map(|b| (b.fach.as_str(), b.von_stunde, b.bis_stunde, b.beginn.as_str(), b.ende.as_str()))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                ("GEC", 2, 2, "08:35", "09:20"),
+                ("D-DV", 3, 4, "09:35", "11:05"),
+                ("WSP", 5, 5, "11:20", "12:05"),
+                ("GEC", 6, 7, "12:05", "13:50"),
+                ("D", 8, 8, "13:50", "14:35"),
+            ]
+        );
+        assert!(mo.iter().all(|b| b.fach_ziel.is_none() && b.lehrkraft.is_none()));
+        let don = plan.tag(Wochentag::Donnerstag).unwrap();
+        let faecher: Vec<String> = don.bloecke().into_iter().map(|b| b.fach).collect();
+        assert_eq!(faecher, vec!["KSK", "WSP", "E", "GEC", "PG"]);
+        assert!(don.stunden.iter().all(|s| s.nr != 8), "— in Std. 8 ist frei");
+        assert_eq!(don.bloecke()[3].von_stunde, 5);
+        assert_eq!(don.bloecke()[3].bis_stunde, 6);
+        assert!(!plan.ist_schultag(Wochentag::Dienstag));
+    }
+
+    #[test]
+    fn tagesabschnitt_schlaegt_matrix() {
+        let md = format!(
+            "## Montag\n| Std. | Zeit | Fach | Lehrkraft |\n|---|---|---|---|\n| 1 | 07:50 – 08:35 | KSK | BERN |\n\n## Plan\n{SPEC_MATRIX}"
+        );
+        let plan = parse_stundenplan(&md);
+        let mo: Vec<String> = plan.tag(Wochentag::Montag).unwrap().bloecke().into_iter().map(|b| b.fach).collect();
+        assert_eq!(mo, vec!["KSK"]);
+        // Donnerstag kommt weiter aus der Matrix
+        assert_eq!(plan.tag(Wochentag::Donnerstag).unwrap().bloecke().len(), 5);
+        // mehrere Matrizen: bei doppeltem (Tag, Nr.) gewinnt die erste
+        let zwei = format!("{SPEC_MATRIX}\ntext\n| Std. | Montag |\n|---|---|\n| 2 | PG |\n| 9 | PG |\n");
+        let mo = parse_stundenplan(&zwei).tag(Wochentag::Montag).unwrap().stunden.clone();
+        assert_eq!(mo[0].fach, "GEC");
+        assert_eq!(mo.last().unwrap().nr, 9);
+    }
+
+    #[test]
+    fn lehrkraft_platzhalter() {
+        let md = "## Montag\n| Std. | Fach | Lehrkraft |\n|---|---|---|\n| 1 | D | — |\n| 2 | E | – |\n| 3 | PG | - |\n| 4 | WSP | *—* |\n| 5 | GEC | HEIN |\n";
+        let plan = parse_stundenplan(md);
+        let l: Vec<Option<&str>> =
+            plan.tag(Wochentag::Montag).unwrap().stunden.iter().map(|s| s.lehrkraft.as_deref()).collect();
+        assert_eq!(l, vec![None, None, None, None, Some("HEIN")]);
+        assert!(ist_platzhalter(" — ") && ist_platzhalter("") && !ist_platzhalter("HEIN"));
+    }
+
+    #[test]
+    fn fach_links_aus_lehrkraefte_tabelle() {
+        let text = include_str!("../../../fixtures/vault/00 Start/Stundenplan.md");
+        let plan = parse_stundenplan(text);
+        let ziel = |k: &str| plan.fach_links.iter().find(|f| f.kurz == k).map(|f| f.ziel.as_str());
+        assert_eq!(ziel("D"), Some("D – Deutsch"));
+        assert_eq!(ziel("KSK"), Some("KSK – Kaufmännische Steuerung und Kontrolle"));
+        assert_eq!(ziel("GEC"), Some("GEC – Geschäftsprozesse im E-Commerce"));
+        assert_eq!(ziel("D-DV"), None, "Link ohne Alias zählt nicht");
+        // je Kürzel nur ein Eintrag
+        assert_eq!(plan.fach_links.iter().filter(|f| f.kurz == "GEC").count(), 1);
+        // Lehrkraft aus der Spalte „Kürzel“ der Lehrkräfte-Tabelle; „D · E — noch offen“ ohne Lehrkraft
+        let lk = |k: &str| plan.fach_links.iter().find(|f| f.kurz == k).and_then(|f| f.lehrkraft.as_deref());
+        assert_eq!(lk("GEC"), Some("HEIN"));
+        assert_eq!(lk("KSK"), Some("BERN"));
+        assert_eq!(lk("PG"), Some("ROTH"));
+        assert_eq!(lk("D"), None);
+        assert_eq!(lk("E"), None);
+    }
+
+    #[test]
+    fn lehrkraft_aus_tabelle_wie_spec() {
+        // SPEC §2: Kürzel = Fach, eigene Spalte „Lehrkraft“
+        let text = "| Kürzel | Fach | Lehrkraft | Linkziel im Vault |\n|---|---|---|---|\n\
+            | GEC | Geschäftsprozesse | HEIN | `[[GEC – Geschäftsprozesse im E-Commerce\\|GEC]]` |\n\
+            | PG | Politik | Rothaus | [[PG – Politik\\|PG]] |\n| D | Deutsch | — | [[D – Deutsch\\|D]] |\n";
+        let plan = parse_stundenplan(text);
+        let lk = |k: &str| plan.fach_links.iter().find(|f| f.kurz == k).and_then(|f| f.lehrkraft.as_deref());
+        assert_eq!(lk("PG"), Some("Rothaus"));
+        assert_eq!(lk("D"), None);
+        // eine Stundenplan-Tabelle (Spalte „Std.“) ist keine Lehrkräfte-Tabelle
+        let plan = parse_stundenplan(
+            "| Std. | Fach | Lehrkraft |\n|---|---|---|\n| 2 | [[GEC – Geschäftsprozesse im E-Commerce\\|GEC]] | HEIN |\n",
+        );
+        assert!(plan.fach_links.iter().all(|f| f.lehrkraft.is_none()), "{:?}", plan.fach_links);
     }
 
     #[test]

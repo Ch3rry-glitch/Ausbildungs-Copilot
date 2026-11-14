@@ -1,10 +1,11 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Rechte des Hauptfensters: Ereignisse, Ordnerauswahl, Links im Browser öffnen.",
+  "description": "Rechte des Hauptfensters: Ereignisse, Fenster schließen nach Rückfrage, Ordnerauswahl, Links im Browser öffnen.",
   "windows": ["main"],
   "permissions": [
     "core:default",
+    "core:window:allow-destroy",
     "opener:default",
     "dialog:allow-open"
   ]

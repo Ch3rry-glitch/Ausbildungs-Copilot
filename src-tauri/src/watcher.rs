@@ -11,6 +11,7 @@ use notify_debouncer_mini::{new_debouncer, DebounceEventResult, Debouncer};
 use crate::error::{AppError, AppResult};
 use crate::index::VaultIndex;
 use crate::model::VaultChanged;
+use crate::write::SelfWrites;
 
 pub type SharedIndex = Arc<RwLock<Option<VaultIndex>>>;
 
@@ -28,11 +29,13 @@ impl VaultWatcher {
 }
 
 /// Startet den Wächter. `on_change` wird nach jeder Index-Aktualisierung aufgerufen
-/// (in der App: Ereignis `vault-changed` an die Oberfläche).
-pub fn start<F>(root: PathBuf, index: SharedIndex, on_change: F) -> AppResult<VaultWatcher>
+/// (in der App: Ereignis `vault-changed` an die Oberfläche). Eigene Schreibvorgänge der App
+/// (Hash passt zu [`SelfWrites`]) landen in `own` statt in `changed`.
+pub fn start<F>(root: PathBuf, index: SharedIndex, writes: Arc<SelfWrites>, on_change: F) -> AppResult<VaultWatcher>
 where
     F: Fn(VaultChanged) + Send + 'static,
 {
+    let watch_root = root.clone();
     let mut debouncer = new_debouncer(DEBOUNCE, move |res: DebounceEventResult| match res {
         Ok(events) => {
             let paths: Vec<PathBuf> = events.into_iter().map(|e| e.path).collect();
@@ -40,10 +43,17 @@ where
                 let Ok(mut guard) = index.write() else { return };
                 let Some(idx) = guard.as_mut() else { return };
                 idx.apply_fs_events(&paths)
-            };
+            }; // Index-Sperre hier freigegeben – is_own liest die Platte
             match result {
-                Ok(ch) if ch.full_rescan || !ch.changed.is_empty() || !ch.removed.is_empty() => on_change(ch),
-                Ok(_) => {}
+                Ok(mut ch) => {
+                    let (own, fremd): (Vec<_>, Vec<_>) =
+                        ch.changed.drain(..).partition(|rel| writes.is_own(&watch_root, rel));
+                    ch.changed = fremd;
+                    ch.own = own;
+                    if ch.full_rescan || !ch.changed.is_empty() || !ch.removed.is_empty() || !ch.own.is_empty() {
+                        on_change(ch);
+                    }
+                }
                 Err(e) => eprintln!("[watcher] {e}"),
             }
         }
@@ -74,7 +84,7 @@ mod tests {
         fs::create_dir_all(root.join(".obsidian")).unwrap();
         let index: SharedIndex = Arc::new(RwLock::new(Some(VaultIndex::build(&root).unwrap())));
         let (tx, rx) = mpsc::channel();
-        let _w = start(root.clone(), index.clone(), move |ch| {
+        let _w = start(root.clone(), index.clone(), Arc::new(SelfWrites::new()), move |ch| {
             let _ = tx.send(ch);
         })
         .unwrap();
