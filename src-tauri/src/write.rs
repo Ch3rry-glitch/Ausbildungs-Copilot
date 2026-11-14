@@ -196,12 +196,10 @@ fn read_io(abs: &Path, p: &RetryPolicy) -> io::Result<(Vec<u8>, NoteVersion)> {
     with_retry(p, || read_once(abs))
 }
 
-/// Liest Bytes + Version; Sperrfehler werden wiederholt.
+/// Liest Bytes + Version; Sperrfehler werden wiederholt. Bleibt die Datei gesperrt, ist das ein
+/// `Io`-Fehler – `Locked` meldet „ließ sich nicht speichern“ und gehört nur zum Schreiben.
 pub fn read_versioned(abs: &Path, p: &RetryPolicy) -> AppResult<(Vec<u8>, NoteVersion)> {
-    read_io(abs, p).map_err(|e| {
-        let name = abs.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-        io_err(e, &name)
-    })
+    read_io(abs, p).map_err(AppError::Io)
 }
 
 /// Notiz für den Editor: Text, Version und Metadaten aus **denselben** Bytes.
@@ -210,7 +208,7 @@ pub fn read_for_edit(root: &Path, rel: &str, p: &RetryPolicy) -> AppResult<NoteC
     let (bytes, version) = match read_io(&abs, p) {
         Ok(x) => x,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Err(AppError::NoteNotFound(rel)),
-        Err(e) => return Err(io_err(e, &rel)),
+        Err(e) => return Err(AppError::Io(e)), // auch Sperrfehler: hier wird nur gelesen
     };
     let d = decode(&bytes);
     // Metadaten wie im Index (verlustbehaftet dekodiert, BOM/CRLF versteht NoteText selbst)
@@ -320,6 +318,8 @@ pub(crate) fn create_with_hook(
         drop(slot);
         match persisted {
             Ok(file) => {
+                // erneut registrieren: die Frist (TTL) läuft ab jetzt, nicht ab dem ersten Versuch
+                writes.register(&rel, &sha);
                 let md = file.metadata()?;
                 Ok(CreateOutcome::Created(version_of(bytes, &md)))
             }
@@ -353,6 +353,95 @@ pub(crate) fn save_with_hook(
     p: &RetryPolicy,
     writes: &SelfWrites,
     before_replace: Hook,
+) -> AppResult<SaveOutcome> {
+    save_inner(root, rel, editor_text, base, p, writes, before_replace, &replace_file)
+}
+
+/// Ausgang eines Versuchs im Ersetzen-Schritt.
+enum Versuch {
+    /// nichts ersetzt (unverändert, Konflikt, fehlt)
+    Fertig(SaveOutcome),
+    /// `replace_file` hat geklappt
+    Ersetzt,
+    /// `ReplaceFileW` hat das Ziel schon entfernt, die Temporärdatei aber nicht umbenannt
+    Halb,
+}
+
+/// `ERROR_UNABLE_TO_MOVE_REPLACEMENT` (1176) / `_2` (1177): ohne Sicherungsdatei ist das Original
+/// danach **weg** (bzw. unter anderem Namen), unser neuer Text liegt nur noch in der Temporärdatei.
+/// Kein Fall zum Wiederholen – der Tausch muss zu Ende gebracht werden.
+fn is_replace_half_done(e: &io::Error) -> bool {
+    cfg!(windows) && matches!(e.raw_os_error(), Some(1176 | 1177))
+}
+
+/// Ersatzname, falls die Temporärdatei nicht an ihren Platz kommt: `GEC 16.11.2026 (gerettet 1a2b3c4d).md`.
+fn rescue_name(abs: &Path, sha: &str) -> String {
+    let stem = abs.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    format!("{stem} (gerettet {}).md", &sha[..8])
+}
+
+/// Dateiname im Ordner von `rel` (Schreibweise wie `rel`).
+fn sibling_rel(rel: &str, name: &str) -> RelPath {
+    match rel.rsplit_once('/') {
+        Some((folder, _)) => format!("{folder}/{name}"),
+        None => name.to_string(),
+    }
+}
+
+/// Halb ersetzt: Temporärdatei ohne Überschreiben an den Zielnamen bringen. Klappt das nicht
+/// (z. B. hat jemand den Namen inzwischen neu belegt), bleibt sie unter einem Ersatznamen liegen –
+/// der Text wird **nie** gelöscht, solange das Ziel fehlt.
+fn finish_half_replace(
+    temp: tempfile::TempPath,
+    abs: &Path,
+    rel: &str,
+    new_sha: &str,
+    p: &RetryPolicy,
+    writes: &SelfWrites,
+) -> AppResult<()> {
+    let mut slot = Some(temp);
+    let moved = with_retry(p, || {
+        let t = slot.take().expect("Temporärdatei fehlt");
+        t.persist_noclobber(abs).map_err(|e| {
+            slot = Some(e.path);
+            e.error
+        })
+    });
+    let Err(e) = moved else { return Ok(()) };
+    let t = slot.take().expect("Temporärdatei fehlt");
+    // Ersatzname als .md: sichtbar in Obsidian und vom Aufräumen alter Temporärdateien nie erfasst
+    let name = rescue_name(abs, new_sha);
+    let rescue_rel = sibling_rel(rel, &name);
+    writes.register(&rescue_rel, new_sha);
+    let gerettet = match t.persist_noclobber(abs.with_file_name(&name)) {
+        Ok(()) => rescue_rel,
+        Err(pe) => {
+            writes.forget(&rescue_rel, new_sha);
+            let mut t = pe.path;
+            let tmp_name = t.file_name().unwrap_or_default().to_string_lossy().into_owned();
+            t.disable_cleanup(true); // nie löschen – sonst wäre der Text weg
+            sibling_rel(rel, &tmp_name)
+        }
+    };
+    Err(AppError::Io(io::Error::new(
+        e.kind(),
+        format!(
+            "„{rel}“ wurde nur halb gespeichert: Windows hat die alte Fassung entfernt, die neue aber nicht an ihren Platz gebracht ({e}). Dein Text ist nicht verloren – er liegt in „{gerettet}“."
+        ),
+    )))
+}
+
+/// Wie [`save_with_hook`], das Ersetzen läuft über `replace` (Tests: halbes Ersetzen nachstellen).
+#[allow(clippy::too_many_arguments)]
+fn save_inner(
+    root: &Path,
+    rel: &str,
+    editor_text: &str,
+    base: &NoteVersion,
+    p: &RetryPolicy,
+    writes: &SelfWrites,
+    before_replace: Hook,
+    replace: &dyn Fn(&Path, &Path) -> io::Result<()>,
 ) -> AppResult<SaveOutcome> {
     // 1. Pfad prüfen; ab hier ist `rel` die Schreibweise auf der Platte
     let (abs, rel) = guard::resolve_for_write(root, rel)?;
@@ -395,32 +484,37 @@ pub(crate) fn save_with_hook(
         before_replace()?;
 
         // 8. Jeder Versuch: neu lesen → vergleichen → ersetzen
-        let outcome = with_retry(p, || -> io::Result<Option<SaveOutcome>> {
+        let outcome = with_retry(p, || -> io::Result<Versuch> {
             let (b, v) = match read_once(&abs) {
                 Ok(x) => x,
-                Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Some(SaveOutcome::Missing)),
+                Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Versuch::Fertig(SaveOutcome::Missing)),
                 Err(e) => return Err(e),
             };
             let dd = decode(&b);
             if dd.text == editor_text {
-                return Ok(Some(SaveOutcome::Unchanged(v)));
+                return Ok(Versuch::Fertig(SaveOutcome::Unchanged(v)));
             }
             if v.sha256 != base.sha256 {
-                return Ok(Some(SaveOutcome::Conflict { disk_text: dd.text, disk_version: v }));
+                return Ok(Versuch::Fertig(SaveOutcome::Conflict { disk_text: dd.text, disk_version: v }));
             }
-            match replace_file(&abs, &temp) {
-                Ok(()) => Ok(None),
-                Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(Some(SaveOutcome::Missing)),
+            match replace(&abs, &temp) {
+                Ok(()) => Ok(Versuch::Ersetzt),
+                // nicht wiederholen: das Ziel ist schon weg, nur die Temporärdatei hat den Text
+                Err(e) if is_replace_half_done(&e) => Ok(Versuch::Halb),
+                Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(Versuch::Fertig(SaveOutcome::Missing)),
                 Err(e) => Err(e),
             }
         })
         .map_err(|e| io_err(e, &rel))?;
 
-        if let Some(o) = outcome {
-            return Ok(o); // 9. `temp` fällt → eigene Temporärdatei gelöscht
+        match outcome {
+            Versuch::Fertig(o) => return Ok(o), // 9. `temp` fällt → eigene Temporärdatei gelöscht
+            // 10. Ersetzt: der Temporärpfad existiert nicht mehr
+            Versuch::Ersetzt => temp.disable_cleanup(true),
+            Versuch::Halb => finish_half_replace(temp, &abs, &rel, &new_sha, p, writes)?,
         }
-        // 10. Ersetzt: der Temporärpfad existiert nicht mehr
-        temp.disable_cleanup(true);
+        // erneut registrieren: die Frist (TTL) läuft ab jetzt, nicht ab dem ersten Versuch (bis ≈15 s)
+        writes.register(&rel, &new_sha);
         // 11. Version: Hash ist maßgeblich, Zeit/Größe frisch von der Platte
         let md = fs::metadata(&abs)?;
         let mut warnungen = Vec::new();
@@ -912,6 +1006,41 @@ mod tests {
         File::options().read(true).write(true).share_mode(0).open(p).unwrap()
     }
 
+    /// Hook für `save_with_hook`: sperrt das Ziel exklusiv **nach** dem Schreiben der Temporärdatei
+    /// (also mitten im Versuchs-Loop), schreibt optional fremde Bytes durch den gesperrten Handle
+    /// und gibt die Sperre nach 300 ms in einem Thread frei.
+    #[cfg(windows)]
+    struct SperreImHook {
+        target: PathBuf,
+        fremd: Option<&'static [u8]>,
+        thread: Mutex<Option<std::thread::JoinHandle<()>>>,
+    }
+
+    #[cfg(windows)]
+    impl SperreImHook {
+        fn new(target: PathBuf, fremd: Option<&'static [u8]>) -> Self {
+            SperreImHook { target, fremd, thread: Mutex::new(None) }
+        }
+        fn sperren(&self) -> io::Result<()> {
+            use std::io::Seek;
+            let mut held = hold_exclusive(&self.target);
+            if let Some(b) = self.fremd {
+                held.set_len(0)?;
+                held.seek(io::SeekFrom::Start(0))?;
+                held.write_all(b)?;
+                held.sync_all()?;
+            }
+            *self.thread.lock().unwrap() = Some(std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(300));
+                drop(held);
+            }));
+            Ok(())
+        }
+        fn join(&self) {
+            self.thread.lock().unwrap().take().expect("Hook lief nicht").join().unwrap();
+        }
+    }
+
     #[cfg(windows)]
     #[test]
     fn gesperrte_datei_wird_wiederholt() {
@@ -922,7 +1051,12 @@ mod tests {
         let held = hold_exclusive(&root.join(REL));
         let r = save(root, REL, "neu\n", &base, &RetryPolicy::none(), &sw());
         assert!(matches!(r, Err(AppError::Locked(_))), "{r:?}");
-        // mit Wiederholen: Sperre löst sich nach 300 ms
+        // Lesen meldet keine Speicher-Meldung („ließ sich nicht speichern“), sondern einen Dateifehler
+        let r = read_for_edit(root, REL, &RetryPolicy::none());
+        assert!(matches!(r, Err(AppError::Io(_))), "{r:?}");
+        let r = read_versioned(&root.join(REL), &RetryPolicy::none());
+        assert!(matches!(r, Err(AppError::Io(_))), "{r:?}");
+        // mit Wiederholen: Sperre (schon beim ersten Lesen) löst sich nach 300 ms
         let h = std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(300));
             drop(held);
@@ -932,29 +1066,101 @@ mod tests {
         assert!(matches!(r, SaveOutcome::Saved { .. }), "{r:?}");
         assert_eq!(bytes(root, REL), b"neu\n");
         no_temp_left(&root.join("03 Unterricht"));
+
+        // Sperre erst im Versuchs-Loop (nach der Temporärdatei): neu lesen, vergleichen, ersetzen
+        let base = put(root, REL, b"alt\n");
+        let sperre = SperreImHook::new(root.join(REL), None);
+        let hook = || sperre.sperren();
+        let r = save_with_hook(root, REL, "neu\n", &base, &RetryPolicy::standard(), &sw(), &hook).unwrap();
+        sperre.join();
+        assert!(matches!(r, SaveOutcome::Saved { .. }), "{r:?}");
+        assert_eq!(bytes(root, REL), b"neu\n");
+        no_temp_left(&root.join("03 Unterricht"));
     }
 
     #[cfg(windows)]
     #[test]
     fn fremder_schreiber_waehrend_sperre_ergibt_konflikt() {
-        use std::io::Seek;
         let dir = vault();
         let root = dir.path();
         let base = put(root, REL, b"alt\n");
-        let mut held = hold_exclusive(&root.join(REL));
-        let h = std::thread::spawn(move || {
-            held.set_len(0).unwrap();
-            held.seek(io::SeekFrom::Start(0)).unwrap();
-            held.write_all(b"vom Sync-Client\n").unwrap();
-            held.sync_all().unwrap();
-            std::thread::sleep(Duration::from_millis(300));
-            drop(held);
-        });
-        let r = save(root, REL, "meins\n", &base, &RetryPolicy::standard(), &sw()).unwrap();
-        h.join().unwrap();
+        // Der Sync-Client sperrt erst, nachdem unsere Temporärdatei fertig ist, und schreibt unter
+        // der Sperre: erst die Prüfung im Versuchs-Loop (nach dem Lösen) erkennt den Konflikt.
+        let sperre = SperreImHook::new(root.join(REL), Some(b"vom Sync-Client\n"));
+        let hook = || sperre.sperren();
+        let w = sw();
+        let r = save_with_hook(root, REL, "meins\n", &base, &RetryPolicy::standard(), &w, &hook).unwrap();
+        sperre.join();
         assert!(matches!(&r, SaveOutcome::Conflict { disk_text, .. } if disk_text == "vom Sync-Client\n"), "{r:?}");
         assert_eq!(bytes(root, REL), b"vom Sync-Client\n");
         no_temp_left(&root.join("03 Unterricht"));
+        assert!(!w.is_own(root, REL));
+    }
+
+    /// `ReplaceFileW` mit 1176: Ziel entfernt, Temporärdatei nicht umbenannt (nachgestellt).
+    #[cfg(windows)]
+    fn halb_ersetzt(code: i32, neu_belegt: Option<&'static [u8]>) -> impl Fn(&Path, &Path) -> io::Result<()> {
+        move |target: &Path, _replacement: &Path| {
+            fs::remove_file(target)?;
+            if let Some(b) = neu_belegt {
+                fs::write(target, b)?;
+            }
+            Err(io::Error::from_raw_os_error(code))
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn halb_ersetzt_wird_fertig_getauscht() {
+        for code in [1176, 1177] {
+            let dir = vault();
+            let root = dir.path();
+            let base = put(root, REL, b"alt\n");
+            let w = sw();
+            let replace = halb_ersetzt(code, None);
+            let r = save_inner(root, REL, "neu\n", &base, &RetryPolicy::standard(), &w, &|| Ok(()), &replace).unwrap();
+            let SaveOutcome::Saved { version, .. } = r else { panic!("{code}: {r:?}") };
+            assert_eq!(bytes(root, REL), b"neu\n", "{code}");
+            assert_eq!(version.sha256, sha256_hex(b"neu\n"));
+            assert!(w.is_own(root, REL));
+            no_temp_left(&root.join("03 Unterricht"));
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn halb_ersetzt_und_name_neu_belegt_behaelt_den_text() {
+        let dir = vault();
+        let root = dir.path();
+        let base = put(root, REL, b"alt\n");
+        let replace = halb_ersetzt(1176, Some(b"neu angelegt\n"));
+        let r = save_inner(root, REL, "meins\n", &base, &RetryPolicy::none(), &sw(), &|| Ok(()), &replace);
+        let Err(AppError::Io(e)) = &r else { panic!("{r:?}") };
+        let gerettet = format!("03 Unterricht/GEC 05.10.2026 (gerettet {}).md", &sha256_hex(b"meins\n")[..8]);
+        assert!(e.to_string().contains(&gerettet), "{e}");
+        assert_eq!(bytes(root, REL), b"neu angelegt\n", "fremde Datei nicht überschrieben");
+        assert_eq!(bytes(root, &gerettet), b"meins\n", "der neue Text ist nicht verloren");
+        no_temp_left(&root.join("03 Unterricht"));
+    }
+
+    #[test]
+    fn langsames_speichern_bleibt_eigen() {
+        // Frist kürzer als die Wartezeit vor dem Ersetzen: trotzdem eigener Schreibvorgang
+        let dir = vault();
+        let root = dir.path();
+        let base = put(root, REL, b"alt\n");
+        let w = SelfWrites::with_ttl(Duration::from_millis(200));
+        let langsam = || {
+            std::thread::sleep(Duration::from_millis(300));
+            Ok(())
+        };
+        let r = save_with_hook(root, REL, "neu\n", &base, &RetryPolicy::none(), &w, &langsam).unwrap();
+        assert!(matches!(r, SaveOutcome::Saved { .. }), "{r:?}");
+        assert!(w.is_own(root, REL));
+        let neu = "03 Unterricht/WSP 16.11.2026.md";
+        let r = create_with_hook(root, neu, "x\n", &RetryPolicy::none(), &w, &langsam).unwrap();
+        assert!(matches!(r, CreateOutcome::Created(_)), "{r:?}");
+        assert!(w.is_own(root, neu));
     }
 
     #[cfg(windows)]

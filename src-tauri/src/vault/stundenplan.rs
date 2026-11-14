@@ -103,13 +103,68 @@ fn push_stunde(tage: &mut Vec<Schultag>, tag: Wochentag, stunde: Stunde, dedupe:
 /// Alle Wikilinks mit Alias in der Datei (auch `\|` in Tabellen): Alias → volles Ziel.
 /// Der erste Link je Kürzel gewinnt.
 pub fn fach_links(body: &str) -> Vec<Fach> {
+    let lehrkraefte = lehrkraefte_aus_tabellen(body);
     let mut out: Vec<Fach> = Vec::new();
     for l in parse_links(body, 0) {
         let Some(alias) = l.alias else { continue };
         if l.embed || l.target.is_empty() || out.iter().any(|f| f.kurz.eq_ignore_ascii_case(&alias)) {
             continue;
         }
-        out.push(Fach { kurz: alias, ziel: l.target, lehrkraft: None });
+        let lehrkraft =
+            lehrkraefte.iter().find(|(k, _)| k.eq_ignore_ascii_case(&alias)).map(|(_, l)| l.clone());
+        out.push(Fach { kurz: alias, ziel: l.target, lehrkraft });
+    }
+    out
+}
+
+/// Lehrkraft je Fach aus Tabellen **außerhalb** des Stundenplans (z. B. „## Lehrkräfte“), damit
+/// auch die Matrix (ohne Lehrkraft-Spalte) eine Lehrkraft liefert (SPEC §6.2):
+///
+/// * Spalte `Lehrkraft`/`Lehrer` → deren Zelle (`| GEC | … | HEIN | [[GEC – …\|GEC]] |`)
+/// * sonst Spalte `Kürzel`, wenn der Fachlink in einer anderen Spalte steht und das Kürzel nicht
+///   das Fach selbst ist (`| HEIN | | [[GEC – …\|GEC]] |`)
+///
+/// Nur Zeilen mit genau einem Alias-Link; Platzhalter (`—`, leer) zählen nicht. Erster Treffer gewinnt.
+fn lehrkraefte_aus_tabellen(body: &str) -> Vec<(String, String)> {
+    let norm = |c: &str| c.trim().trim_matches('*').trim().trim_end_matches('.').to_lowercase();
+    let mut out: Vec<(String, String)> = Vec::new();
+    // (Lehrkraft-Spalte, Kürzel-Spalte) der aktuellen Tabelle; None = keine/fremde Tabelle
+    let mut header: Option<Option<(Option<usize>, Option<usize>)>> = None;
+    for line in body.lines() {
+        let t = line.trim();
+        if !t.starts_with('|') {
+            header = None;
+            continue;
+        }
+        let cells = split_row(t);
+        if cells.iter().all(|c| c.chars().all(|ch| matches!(ch, '-' | ':' | ' '))) {
+            continue;
+        }
+        let Some(cols) = header else {
+            let find = |names: &[&str]| cells.iter().position(|c| names.contains(&norm(c).as_str()));
+            let stundenplan = find(&["std", "stunde"]).is_some();
+            let lk = find(&["lehrkraft", "lehrer"]);
+            let kz = find(&["kürzel", "kuerzel"]);
+            header = Some((!stundenplan && (lk.is_some() || kz.is_some())).then_some((lk, kz)));
+            continue;
+        };
+        let Some((lk, kz)) = cols else { continue };
+        let links: Vec<(usize, String)> = cells
+            .iter()
+            .enumerate()
+            .flat_map(|(i, c)| parse_links(c, 0).into_iter().filter(|l| !l.embed).filter_map(move |l| Some((i, l.alias?))))
+            .collect();
+        let [(link_col, alias)] = links.as_slice() else { continue };
+        let get = |i: usize| cells.get(i).map(|s| s.trim().trim_matches('*').trim()).unwrap_or("");
+        let lehrkraft = match (lk, kz) {
+            (Some(i), _) if i != *link_col => get(i),
+            (None, Some(i)) if i != *link_col && !get(i).eq_ignore_ascii_case(alias) => get(i),
+            _ => continue,
+        };
+        if ist_platzhalter(lehrkraft) || out.iter().any(|(k, _)| k.eq_ignore_ascii_case(alias)) {
+            continue;
+        }
+        out.push((alias.clone(), lehrkraft.to_string()));
     }
     out
 }
@@ -410,6 +465,30 @@ mod tests {
         assert_eq!(ziel("D-DV"), None, "Link ohne Alias zählt nicht");
         // je Kürzel nur ein Eintrag
         assert_eq!(plan.fach_links.iter().filter(|f| f.kurz == "GEC").count(), 1);
+        // Lehrkraft aus der Spalte „Kürzel“ der Lehrkräfte-Tabelle; „D · E — noch offen“ ohne Lehrkraft
+        let lk = |k: &str| plan.fach_links.iter().find(|f| f.kurz == k).and_then(|f| f.lehrkraft.as_deref());
+        assert_eq!(lk("GEC"), Some("HEIN"));
+        assert_eq!(lk("KSK"), Some("BERN"));
+        assert_eq!(lk("PG"), Some("ROTH"));
+        assert_eq!(lk("D"), None);
+        assert_eq!(lk("E"), None);
+    }
+
+    #[test]
+    fn lehrkraft_aus_tabelle_wie_spec() {
+        // SPEC §2: Kürzel = Fach, eigene Spalte „Lehrkraft“
+        let text = "| Kürzel | Fach | Lehrkraft | Linkziel im Vault |\n|---|---|---|---|\n\
+            | GEC | Geschäftsprozesse | HEIN | `[[GEC – Geschäftsprozesse im E-Commerce\\|GEC]]` |\n\
+            | PG | Politik | Rothaus | [[PG – Politik\\|PG]] |\n| D | Deutsch | — | [[D – Deutsch\\|D]] |\n";
+        let plan = parse_stundenplan(text);
+        let lk = |k: &str| plan.fach_links.iter().find(|f| f.kurz == k).and_then(|f| f.lehrkraft.as_deref());
+        assert_eq!(lk("PG"), Some("Rothaus"));
+        assert_eq!(lk("D"), None);
+        // eine Stundenplan-Tabelle (Spalte „Std.“) ist keine Lehrkräfte-Tabelle
+        let plan = parse_stundenplan(
+            "| Std. | Fach | Lehrkraft |\n|---|---|---|\n| 2 | [[GEC – Geschäftsprozesse im E-Commerce\\|GEC]] | HEIN |\n",
+        );
+        assert!(plan.fach_links.iter().all(|f| f.lehrkraft.is_none()), "{:?}", plan.fach_links);
     }
 
     #[test]

@@ -2,7 +2,8 @@
 // Der Unterschied wird im Frontend von @codemirror/merge berechnet.
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import { EditorState } from "@codemirror/state";
-import { EditorView } from "@codemirror/view";
+import { EditorView, keymap } from "@codemirror/view";
+import { history, historyKeymap } from "@codemirror/commands";
 import { MergeView } from "@codemirror/merge";
 import { editorBase } from "../editor/setup";
 import { Icon } from "../icons";
@@ -34,7 +35,8 @@ export function ConflictDialog({
   useEffect(() => {
     if (!host.current) return;
     const mv = new MergeView({
-      a: { doc: mine, extensions: [...editorBase, EditorView.lineWrapping] },
+      // Verlauf nur links (nicht in editorBase): ein falsch geklickter Pfeil lässt sich mit Strg+Z zurücknehmen
+      a: { doc: mine, extensions: [...editorBase, EditorView.lineWrapping, history(), keymap.of(historyKeymap)] },
       b: {
         doc: diskText,
         extensions: [...editorBase, EditorView.lineWrapping, EditorState.readOnly.of(true), EditorView.editable.of(false)],

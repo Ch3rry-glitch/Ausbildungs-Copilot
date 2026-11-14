@@ -157,10 +157,11 @@ function UnsavedDialog({
         </p>
       </div>
       <div className="modal-foot">
-        <button className="btn" onClick={() => onChoice("cancel")}>
+        {/* „Verwerfen“ bekommt nie den Startfokus – ein Reflex-Enter darf keinen Text löschen */}
+        <button className="btn" onClick={() => onChoice("cancel")} data-autofocus={canSave ? undefined : true}>
           Abbrechen
         </button>
-        <button className="btn danger" onClick={() => onChoice("discard")} data-autofocus={canSave ? undefined : true}>
+        <button className="btn danger" onClick={() => onChoice("discard")}>
           Verwerfen
         </button>
         {canSave && (

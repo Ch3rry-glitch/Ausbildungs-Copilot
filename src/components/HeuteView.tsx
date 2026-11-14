@@ -100,10 +100,11 @@ export function HeuteView({
           <button className="btn small icon-only" onClick={() => step(1)} disabled={!tag} title="Nächster Tag" aria-label="Nächster Tag">
             {Icon.chevronRight}
           </button>
+          {/* Wert aus dem lokalen Zustand: sonst setzt React die Tastatureingabe bis zur Antwort zurück */}
           <input
             type="date"
             className="input"
-            value={tag?.datum ?? ""}
+            value={date ?? tag?.datum ?? ""}
             onChange={(e) => setDate(e.target.value || null)}
             aria-label="Datum wählen"
           />

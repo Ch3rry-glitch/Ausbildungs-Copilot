@@ -238,6 +238,22 @@ fn vorhandene_notizen_werden_zugeordnet() {
     assert_eq!(notiz(&t.bloecke[3].erste_notiz), Some("03 Unterricht/GEC 05.10.2026.md"));
 }
 
+// 3b – Sync-/Konfliktkopien landen in „Weitere Notizen“, nie im Platz des Originals (R8)
+#[test]
+fn konfliktkopien_belegen_keinen_block() {
+    let (_d, root) = vault_copy();
+    let original = fs::read(root.join("03 Unterricht/GEC 05.10.2026.md")).unwrap();
+    let kopien = ["03 Unterricht/GEC 05.10.2026-LAPTOP.md", "03 Unterricht/GEC 05.10.2026 (1).md"];
+    for k in kopien {
+        fs::write(root.join(k), &original).unwrap();
+    }
+    let index = shared(&root);
+    let t = tag(&root, &index, d(2026, 10, 5), samstag());
+    assert_eq!(notiz(&t.bloecke[0].notiz), Some("03 Unterricht/GEC 05.10.2026.md"));
+    let weitere: Vec<&str> = t.weitere_notizen.iter().map(|n| n.path.as_str()).collect();
+    assert_eq!(weitere, vec![kopien[1], kopien[0]]);
+}
+
 // 4
 #[test]
 fn altbestand_wird_zugeordnet() {
@@ -578,6 +594,11 @@ fn matrix_stundenplan() {
     let faecher: Vec<&str> = don.bloecke.iter().map(|b| b.block.fach.as_str()).collect();
     assert_eq!(faecher, vec!["KSK", "WSP", "E", "GEC", "PG"]);
     assert_eq!(don.bloecke[0].fach.link, "[[KSK – Kaufmännische Steuerung und Kontrolle|KSK]]");
+    // Lehrkraft ohne Fachnotiz: aus der Lehrkräfte-Tabelle der Stundenplan-Seite (SPEC §6.2)
+    let lk: Vec<Option<&str>> = don.bloecke.iter().map(|b| b.fach.lehrkraft.as_deref()).collect();
+    assert_eq!(lk[0], Some("BERN"), "KSK");
+    assert_eq!(lk[4], Some("ROTH"), "PG");
+    assert_eq!(lk[2], None, "E – noch offen");
 
     let r = create(&index, &root, &req(d(2026, 11, 16), "GEC", 1, Some(LF04), Some("Kalkulation")), &SelfWrites::new());
     let bytes = fs::read(root.join(created_path(&r))).unwrap();

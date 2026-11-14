@@ -135,15 +135,15 @@ function Cockpit() {
     let asking = false;
     const un = getCurrentWindow().onCloseRequested(async (e) => {
       if (asking) {
-        e.preventDefault();
+        e.preventDefault(); // zweites Schließen, während noch gewartet oder gefragt wird
         return;
       }
-      const ed = editorRef.current;
-      if (ed) await ed.whenIdle(); // nie einen zweiten Speichervorgang auf der alten Basis starten
-      if (!ed?.dirty) return; // kein preventDefault → das Fenster schließt
-      e.preventDefault();
-      asking = true;
+      asking = true; // schon vor dem Warten auf das Speichern, sonst stapeln sich zwei Dialoge
       try {
+        const ed = editorRef.current;
+        if (ed) await ed.whenIdle(); // nie einen zweiten Speichervorgang auf der alten Basis starten
+        if (!ed?.dirty) return; // kein preventDefault → das Fenster schließt
+        e.preventDefault();
         const name = ed.currentPath ? baseName(ed.currentPath) : "Notiz";
         const c = await askUnsaved(name, { canSave: ed.canSave });
         if (c === "cancel") return;

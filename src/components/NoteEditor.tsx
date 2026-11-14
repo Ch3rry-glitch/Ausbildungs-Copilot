@@ -1,7 +1,7 @@
 // Handgeschriebene CodeMirror-Hülle (kein @uiw/react-codemirror). Die Ansicht wird einmal erzeugt;
 // jeder Notizwechsel baut einen frischen EditorState (eigener Verlauf je Notiz).
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
-import { Compartment, EditorState, Transaction } from "@codemirror/state";
+import { Compartment, EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { editorBase, mainEditorExtensions } from "../editor/setup";
 
@@ -9,7 +9,8 @@ export interface NoteEditorHandle {
   getText(): string;
   /** frischer Zustand mit leerem Verlauf – für JEDEN Notizwechsel und jede übernommene Fassung */
   load(text: string, opts: { readonly: boolean }): void;
-  /** stilles Nachladen von außen: ein Dispatch ohne Verlaufseintrag, Cursor begrenzt */
+  /** stilles Nachladen von außen (nur bei sauberem Puffer): frischer Zustand mit leerem Verlauf,
+   *  Cursor begrenzt, Scrollposition bleibt */
   replaceDoc(text: string): void;
   setReadonly(b: boolean): void;
   /** 1-basiert; scrollt hin und setzt den Cursor an den Zeilenanfang */
@@ -67,11 +68,15 @@ export const NoteEditor = forwardRef<NoteEditorHandle, { onSave: () => void; onC
       replaceDoc: (text) => {
         const v = view.current;
         if (!v) return;
+        // Nicht per Dispatch mit addToHistory=false: der Verlauf würde alte Schritte durch das
+        // Ersetzen des ganzen Dokuments abbilden, Strg+Z fügte dann veralteten Text am Ende ein.
         const head = Math.min(v.state.selection.main.head, text.length);
-        v.dispatch({
-          changes: { from: 0, to: v.state.doc.length, insert: text },
-          selection: { anchor: head },
-          annotations: Transaction.addToHistory.of(false),
+        const top = v.scrollDOM.scrollTop;
+        v.setState(makeState(text, v.state.readOnly));
+        v.dispatch({ selection: { anchor: head } });
+        v.scrollDOM.scrollTop = top;
+        requestAnimationFrame(() => {
+          if (view.current === v) v.scrollDOM.scrollTop = top;
         });
       },
       setReadonly: (b) => {

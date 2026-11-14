@@ -175,6 +175,12 @@ fn fill_body(body: &str, input: &FillInput, warnungen: &mut Vec<String>) -> Stri
 /// Füllt die Vorlage aus. Liefert den neuen Text und deutsche Warnungen (für die Vorschau).
 pub fn fill_template(template: &str, input: &FillInput) -> (String, Vec<String>) {
     let mut warnungen = Vec::new();
+    // BOM vorne abnehmen und am Ende wieder anfügen: ohne Frontmatter landete es sonst im Body
+    // (vor „# …“), und neues Frontmatter stünde davor
+    let (bom, template) = match template.strip_prefix('\u{FEFF}') {
+        Some(rest) => ("\u{FEFF}", rest),
+        None => ("", template),
+    };
     let mut note = NoteText::parse(template);
     let template_yaml_ok = note.fields().is_ok();
 
@@ -193,7 +199,7 @@ pub fn fill_template(template: &str, input: &FillInput) -> (String, Vec<String>)
 
     let body = fill_body(note.body(), input, &mut warnungen);
     note.set_body(body);
-    let out = note.render();
+    let out = format!("{bom}{}", note.render());
 
     if out.contains("{{") || out.contains("<%") {
         warnungen.push(W_FREMDE_PLATZHALTER.to_string());
@@ -401,7 +407,10 @@ pub fn faecher(idx: &VaultIndex, plan: Option<&Stundenplan>) -> Vec<FachInfo> {
                 .or_else(|| a.note_ziel.clone())
                 .or_else(|| links.iter().find(|f| f.kurz.eq_ignore_ascii_case(&a.kurz)).map(|f| f.ziel.clone()))
                 .unwrap_or_else(|| a.kurz.clone());
-            let lehrkraft = a.lehrkraft_tt.clone().or(a.note_lehrkraft.clone());
+            // Stundenplan-Zelle, dann Fachnotiz, dann Lehrkräfte-Tabelle der Stundenplan-Seite (Matrix)
+            let lehrkraft = a.lehrkraft_tt.clone().or(a.note_lehrkraft.clone()).or_else(|| {
+                links.iter().find(|f| f.kurz.eq_ignore_ascii_case(&a.kurz)).and_then(|f| f.lehrkraft.clone())
+            });
             (a.order, fach_info(idx, &a.kurz, &ziel, lehrkraft, a.order.is_some()))
         })
         .collect();
@@ -774,6 +783,12 @@ mod tests {
         let bom = format!("\u{FEFF}{TEMPLATE}");
         let (out, _) = fill_template(&bom, &input_a());
         assert_eq!(out, format!("\u{FEFF}{}", golden_a()));
+        // BOM ohne Frontmatter: BOM bleibt ganz vorne, die Überschrift wird trotzdem gefüllt
+        let (out, w) = fill_template("\u{FEFF}# JJJJ-MM-TT Fach – Thema\n", &input_a());
+        assert!(out.starts_with("\u{FEFF}---\ndatum: 2026-11-16\n"), "{out:?}");
+        assert!(out.ends_with("---\n# 2026-11-16 GEC – Kalkulation\n"), "{out:?}");
+        assert_eq!(out.matches('\u{FEFF}').count(), 1);
+        assert!(!w.contains(&W_KEINE_UEBERSCHRIFT.to_string()), "{w:?}");
     }
 
     #[test]
@@ -814,6 +829,13 @@ mod tests {
         assert!(w.contains(&W_KEIN_THEMA.to_string()), "{w:?}");
         assert!(out.contains("<% tp.file.title %>"));
         assert!(out.contains("\ndatum: 2026-11-16\n"), "{out}");
+        // nur Obsidian-Kernvorlage „{{…}}“ (kein „<%“), die das Ausfüllen überlebt
+        let t = "---\ndatum: \nfach: \n---\n# JJJJ-MM-TT Fach\n\n**Fach:** [[]]\n{{title}}\n";
+        let (out, w) = fill_template(t, &input_b());
+        assert!(out.contains("\n{{title}}\n") && !out.contains("<%"), "{out}");
+        assert!(w.contains(&W_FREMDE_PLATZHALTER.to_string()), "{w:?}");
+        let (_, w) = fill_template(TEMPLATE, &input_b());
+        assert!(!w.contains(&W_FREMDE_PLATZHALTER.to_string()), "{w:?}");
         // ohne Überschrift und ohne Fachzeile
         let (out, w) = fill_template("Nur Text\n", &input_a());
         assert!(w.contains(&W_KEINE_UEBERSCHRIFT.to_string()));

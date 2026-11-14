@@ -83,8 +83,11 @@ export function CreateNoteDialog({
     [tag, fach],
   );
   const fachAnzahl = bloeckeDesFachs.length;
-  const showBlock = fachAnzahl > 1 || (initial.block ?? 1) > 1;
-  const blockMax = Math.max(fachAnzahl, initial.block ?? 1, 1);
+  // Vorbelegter Block zählt nur für den vorbelegten Tag und das vorbelegte Fach
+  const initialBlock =
+    (initial.datum == null || datum === initial.datum) && gleich(fach, initial.fach ?? "") ? (initial.block ?? 1) : 1;
+  const showBlock = fachAnzahl > 1 || initialBlock > 1;
+  const blockMax = Math.max(fachAnzahl, initialBlock, 1);
   const effBlock = showBlock ? Math.min(block, blockMax) : 1;
   const heuteBlock = bloeckeDesFachs.find((b) => b.fachNr === effBlock) ?? null;
 
@@ -173,7 +176,10 @@ export function CreateNoteDialog({
                 type="date"
                 className="input"
                 value={datum ?? ""}
-                onChange={(e) => setDatum(e.target.value || null)}
+                onChange={(e) => {
+                  setDatum(e.target.value || null);
+                  setBlock(1);
+                }}
                 required
               />
             </label>

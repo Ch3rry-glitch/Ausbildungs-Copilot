@@ -117,6 +117,8 @@ export function UnterrichtView({
   const pendingSave = useRef<Promise<boolean> | null>(null);
   const recheckAfterSave = useRef(false);
   const removedInfo = useRef<{ path: string; at: number; sha: string } | null>(null);
+  const loadSeq = useRef(0);
+  const diskSeq = useRef(0);
 
   const readonly = !loaded || !loaded.editable || external === "removed";
   const canSaveNow = () => {
@@ -210,6 +212,7 @@ export function UnterrichtView({
           setSaveError(null);
           recomputeDirty(); // während des Speicherns kann weitergetippt worden sein
           notify({ kind: "saved", text: "Gespeichert: " + r.report.relPath, path: r.report.relPath, detail: r.report.warnungen });
+          if (cur.lineEnding === "mixed") refreshLineEnding(r.report.relPath);
           return true;
         case "unchanged":
           setLoaded({ ...cur, base: { text, version: r.version } });
@@ -220,7 +223,8 @@ export function UnterrichtView({
           return true;
         case "conflict":
           setSaveError(null);
-          setConflict({ mine: text, diskText: r.diskText, diskVersion: r.diskVersion, error: null });
+          // aktueller Puffer, nicht der Stand bei Strg+S: während des Speicherns kann weitergetippt worden sein
+          setConflict({ mine: ed.current?.getText() ?? text, diskText: r.diskText, diskVersion: r.diskVersion, error: null });
           return false;
         case "missing":
           setExternal("removed");
@@ -228,6 +232,19 @@ export function UnterrichtView({
           return false;
       }
     });
+  }
+
+  /** Nach dem Speichern einer Datei mit gemischten Zeilenenden: die vereinheitlichte Form anzeigen. */
+  function refreshLineEnding(path: string) {
+    api
+      .readNote(path)
+      .then((d) => {
+        const l = loadedRef.current;
+        if (l && samePath(l.path, d.meta.path)) setLoaded({ ...l, lineEnding: d.lineEnding, bom: d.bom });
+      })
+      .catch(() => {
+        // nur die Anzeige; beim nächsten Öffnen stimmt sie wieder
+      });
   }
 
   async function whenIdle(): Promise<void> {
@@ -271,6 +288,7 @@ export function UnterrichtView({
           setSaveError(null);
           setConflict(null);
           bumpPreview();
+          if (cur.lineEnding === "mixed" && r.status === "saved") refreshLineEnding(path);
           if (r.status === "saved") {
             notify({ kind: "saved", text: "Gespeichert: " + path, path, detail: r.report.warnungen });
           } else {
@@ -305,6 +323,9 @@ export function UnterrichtView({
     clearExternal();
     setConflict(null);
     bumpPreview();
+    // Die Fassung stammt vom Öffnen des Dialogs – hat Obsidian inzwischen erneut gespeichert,
+    // lädt der (jetzt saubere) Puffer still die neuere nach.
+    void checkDisk();
   }
 
   // ---------- Änderungen von außen ----------
@@ -317,15 +338,17 @@ export function UnterrichtView({
       recheckAfterSave.current = true;
       return;
     }
+    const mine = ++diskSeq.current; // nur die jüngste Prüfung zählt (Lesevorgänge können sich überholen)
     let disk: NoteContent;
     try {
       disk = await api.readNote(path);
     } catch (e) {
-      if (!samePath(loadedRef.current?.path, path)) return;
+      if (mine !== diskSeq.current || !samePath(loadedRef.current?.path, path)) return;
       if (isNoteNotFound(e)) markRemoved(path, []);
       else notify({ kind: "error", text: errorText(e) });
       return;
     }
+    if (mine !== diskSeq.current) return;
     if (savingRef.current) {
       recheckAfterSave.current = true;
       return;
@@ -441,12 +464,22 @@ export function UnterrichtView({
 
   // ---------- Öffnen ----------
   async function loadNote(path: string, line?: number) {
+    const mine = ++loadSeq.current;
     let c: NoteContent;
     try {
       c = await api.readNote(path);
     } catch (e) {
-      notify({ kind: "error", text: errorText(e) });
+      if (mine === loadSeq.current) notify({ kind: "error", text: errorText(e) });
       return;
+    }
+    if (mine !== loadSeq.current) return; // ein späteres Öffnen hat übernommen
+    // Während des Lesens blieb die alte Notiz bearbeitbar: wurde dort weitergetippt, erst fragen.
+    const l = loadedRef.current;
+    if (l && dirtyRef.current) {
+      const choice = await askUnsaved(l.title, { canSave: canSaveNow() });
+      if (mine !== loadSeq.current || choice === "cancel") return;
+      if (choice === "save" && !(await save())) return;
+      if (mine !== loadSeq.current) return;
     }
     const e = ed.current;
     if (!e) return;
@@ -589,6 +622,8 @@ export function UnterrichtView({
   useEffect(() => {
     if (prevVault.current === vaultPath) return;
     prevVault.current = vaultPath;
+    loadSeq.current += 1; // laufendes Öffnen aus dem alten Vault verwerfen
+    diskSeq.current += 1;
     setLoaded(null);
     ed.current?.load("", { readonly: true });
     setDirty(false);

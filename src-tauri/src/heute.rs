@@ -178,9 +178,13 @@ pub fn heute(
         let mut passend: Vec<usize> = (0..kandidaten.len())
             .filter(|i| !vergeben[*i] && ziele.iter().any(|z| fach_matches(kandidaten[*i], kurz, z)))
             .collect();
-        passend.sort_by(|a, b| {
-            (block_nr(kandidaten[*a]), &kandidaten[*a].path).cmp(&(block_nr(kandidaten[*b]), &kandidaten[*b].path))
-        });
+        // Notizen mit echtem Unterrichts-Namen zuerst: Sync-/Konfliktkopien wie „GEC 05.10.2026 (1)“
+        // oder „GEC 05.10.2026-LAPTOP“ belegen nie den Platz des Originals (→ „Weitere Notizen“)
+        let rang = |i: usize| {
+            let m = kandidaten[i];
+            (block_nr(m), naming::parse_unterricht(&m.title).is_none(), &m.path)
+        };
+        passend.sort_by(|a, b| rang(*a).cmp(&rang(*b)));
         for i in passend {
             let n = block_nr(kandidaten[i]);
             if let Some(p) = positionen.iter().find(|p| bloecke[**p].fach_nr == n && bloecke[**p].notiz.is_none()) {
