@@ -116,6 +116,9 @@ pub struct NoteSummary {
     pub modified_ms: i64,
     pub open_tasks: usize,
     pub tags: Vec<String>,
+    /// Frontmatter-`thema` als Text, `None` wenn leer
+    #[serde(default)]
+    pub thema: Option<String>,
 }
 
 impl From<&NoteMeta> for NoteSummary {
@@ -129,11 +132,36 @@ impl From<&NoteMeta> for NoteSummary {
             modified_ms: m.modified_ms,
             open_tasks: m.tasks.iter().filter(|t| !t.done).count(),
             tags: m.tags.clone(),
+            thema: m
+                .fields
+                .iter()
+                .find(|f| f.key.eq_ignore_ascii_case("thema"))
+                .and_then(|f| crate::vault::frontmatter::field_as_text(&f.value)),
         }
     }
 }
 
-/// Eine Notiz zum Anzeigen: Metadaten + Text.
+/// Versionsmarke einer Datei: der Hash entscheidet über Konflikte, Zeit und Größe sind Zusatzinfos.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NoteVersion {
+    /// SHA-256 der Bytes auf der Platte, Kleinbuchstaben-Hex
+    pub sha256: String,
+    pub modified_ms: i64,
+    pub size: u64,
+}
+
+/// Zeilenenden einer Datei, wie sie auf der Platte stehen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LineEnding {
+    Lf,
+    Crlf,
+    /// beides gemischt – wird beim Speichern vereinheitlicht (mit Warnung)
+    Mixed,
+}
+
+/// Eine Notiz zum Anzeigen und Bearbeiten: Metadaten + Text + Version.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NoteContent {
@@ -142,6 +170,15 @@ pub struct NoteContent {
     pub body: String,
     /// die Frontmatter wörtlich (ohne `---`), falls vorhanden
     pub frontmatter_raw: Option<String>,
+    /// ganze Datei, BOM entfernt, CRLF → LF (Puffer für den Editor)
+    pub text: String,
+    /// Hash der rohen Bytes auf der Platte
+    pub version: NoteVersion,
+    pub line_ending: LineEnding,
+    pub bom: bool,
+    /// `false`, wenn die Datei kein gültiges UTF-8 ist
+    pub editable: bool,
+    pub readonly_reason: Option<String>,
 }
 
 /// Ordner im Vault für die Ordnerliste.
@@ -269,6 +306,9 @@ pub struct Schultag {
 #[serde(rename_all = "camelCase")]
 pub struct Stundenplan {
     pub tage: Vec<Schultag>,
+    /// alle Wikilinks mit Alias aus der Datei (z. B. Tabelle „Lehrkräfte“): Alias → volles Ziel
+    #[serde(default)]
+    pub fach_links: Vec<Fach>,
 }
 
 /// Ein Fach, wie die App es kennt. Kommt später aus `01 Fächer/` + Einstellungen.
@@ -300,8 +340,171 @@ impl Fach {
 pub struct VaultChanged {
     pub changed: Vec<RelPath>,
     pub removed: Vec<RelPath>,
+    /// eigene Schreibvorgänge der App – werden nie als „aus Obsidian übernommen“ gemeldet
+    #[serde(default)]
+    pub own: Vec<RelPath>,
     /// `true`, wenn der Index komplett neu aufgebaut wurde (z. B. Ordner umbenannt)
     pub full_rescan: bool,
+}
+
+// ---------------------------------------------------------------------------------------------
+// M1: Unterricht + Heute
+// ---------------------------------------------------------------------------------------------
+
+/// Ein Fach, wie Stundenplan und `01 Fächer/` es zusammen ergeben.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FachInfo {
+    pub kurz: String,
+    pub ziel: String,
+    /// der Link, den die App schreibt (`[[Ziel|Kurz]]` oder `[[Ziel]]`)
+    pub link: String,
+    pub lehrkraft: Option<String>,
+    /// gibt es eine Notiz mit dem Titel `ziel`?
+    pub ziel_existiert: bool,
+    pub notiz_pfad: Option<RelPath>,
+    pub im_stundenplan: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LernfeldInfo {
+    pub path: RelPath,
+    pub titel: String,
+    /// `LF04`
+    pub kurz: Option<String>,
+    pub nummer: Option<u32>,
+    pub fach: Option<String>,
+    pub link: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TagArt {
+    Schultag,
+    Betriebstag,
+    Wochenende,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum StundenplanStatus {
+    Ok,
+    /// Datei fehlt oder ist nicht lesbar
+    Fehlt,
+    /// Datei da, aber kein Format liefert einen Tag
+    Leer,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HeuteBlock {
+    /// 0-basiert im Tag
+    pub position: usize,
+    pub block: Block,
+    /// 1-basiert: n-ter Block dieses Fachs heute
+    pub fach_nr: u8,
+    /// Blöcke dieses Fachs heute
+    pub fach_anzahl: u8,
+    pub fach: FachInfo,
+    pub notiz: Option<NoteSummary>,
+    /// nur für `fach_nr > 1`: die Notiz des 1. Blocks
+    pub erste_notiz: Option<NoteSummary>,
+    /// wo „Notiz anlegen“ die Datei anlegen würde
+    pub neuer_pfad: RelPath,
+    pub hinweis: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FaelligeAufgabe {
+    pub path: RelPath,
+    pub title: String,
+    pub fach: Option<String>,
+    pub line: usize,
+    pub text: String,
+    pub due: NaiveDate,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FaelligeAufgaben {
+    pub ueberfaellig: Vec<FaelligeAufgabe>,
+    pub heute: Vec<FaelligeAufgabe>,
+    pub naechste_tage: Vec<FaelligeAufgabe>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HeuteTag {
+    pub datum: NaiveDate,
+    /// „Montag“ … „Sonntag“
+    pub wochentag: String,
+    pub art: TagArt,
+    pub ist_heute: bool,
+    pub stundenplan: StundenplanStatus,
+    pub bloecke: Vec<HeuteBlock>,
+    pub weitere_notizen: Vec<NoteSummary>,
+    /// Position des aktuellen Blocks – nur, wenn `ist_heute`
+    pub aktueller_block: Option<usize>,
+    pub aufgaben: FaelligeAufgaben,
+    pub warnungen: Vec<String>,
+}
+
+/// Anfrage „Neue Unterrichtsnotiz“ aus der Oberfläche.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NeueUnterrichtsnotiz {
+    pub datum: NaiveDate,
+    /// Kürzel
+    pub fach: String,
+    /// `fach_nr`, 1-basiert
+    pub block: u8,
+    /// `LernfeldInfo.path`
+    pub lernfeld: Option<RelPath>,
+    pub thema: Option<String>,
+}
+
+/// Trockenlauf: was „Anlegen“ schreiben würde.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotizVorschau {
+    pub rel_path: RelPath,
+    pub text: String,
+    pub fach_link: String,
+    pub lernfeld_link: Option<String>,
+    pub lehrkraft: Option<String>,
+    pub existiert: Option<RelPath>,
+    pub warnungen: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WriteReport {
+    /// Schreibweise auf der Platte
+    pub rel_path: RelPath,
+    pub created: bool,
+    pub version: NoteVersion,
+    pub created_folders: Vec<RelPath>,
+    pub warnungen: Vec<String>,
+}
+
+/// Ergebnis von „Speichern“. Konflikt und fehlende Datei sind Ergebnisse, keine Fehler.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "status", rename_all = "camelCase", rename_all_fields = "camelCase")]
+pub enum SaveResult {
+    Saved { report: WriteReport },
+    Unchanged { version: NoteVersion },
+    Conflict { disk_text: String, disk_version: NoteVersion },
+    Missing { rel_path: RelPath },
+}
+
+/// Ergebnis von „Anlegen“.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "status", rename_all = "camelCase", rename_all_fields = "camelCase")]
+pub enum CreateResult {
+    Created { report: WriteReport },
+    Exists { rel_path: RelPath },
 }
 
 #[cfg(test)]
