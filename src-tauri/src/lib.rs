@@ -14,11 +14,15 @@
 //! * [`config`]  – Einstellungen in `%APPDATA%\ausbildungs-cockpit`
 //! * [`logbuch`] – Logbucheinträge für Moodle: Entwurf, Text, Status (nur `logbuch:` im Vault)
 //! * [`ki`]      – KI hinter `LlmProvider` (Anthropic), Schlüssel im Anmeldeinformationsspeicher
+//! * [`aufgaben`] – Arbeitsaufträge und Lernaufgaben wie `00 Start/Aufgaben.md`, Abhaken, gelöst
+//! * [`fragen`]  – `#frage` / `#nochmal`, „geklärt“ (durchstreichen oder in „Geklärt“ verschieben)
 //! * [`commands`] – Tauri-Befehle
 
+pub mod aufgaben;
 pub mod commands;
 pub mod config;
 pub mod error;
+pub mod fragen;
 pub mod guard;
 pub mod heute;
 pub mod index;
@@ -195,6 +199,13 @@ pub fn run() {
             commands::ki_schluessel_speichern,
             commands::ki_schluessel_loeschen,
             commands::ki_modell_setzen,
+            commands::aufgaben_uebersicht,
+            commands::aufgabe_abhaken,
+            commands::lernaufgabe_geloest,
+            commands::fragen_uebersicht,
+            commands::frage_klaeren,
+            commands::fragen_einstellungen,
+            commands::fragen_einstellungen_speichern,
         ])
         .run(tauri::generate_context!())
         .expect("Ausbildungs-Cockpit konnte nicht gestartet werden");

@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{AppError, AppResult};
-use crate::model::LogbuchFach;
+use crate::model::{FragenEinstellungen, LogbuchFach};
 
 pub const APP_DIR_NAME: &str = "ausbildungs-cockpit";
 const CONFIG_FILE: &str = "config.json";
@@ -27,6 +27,9 @@ pub struct AppConfig {
     /// M2: KI-Einstellungen (der Schlüssel liegt **nicht** hier, sondern im Anmeldeinformationsspeicher)
     #[serde(default)]
     pub ki: KiEinstellungen,
+    /// M3: was „geklärt“ mit einer `#frage`-Zeile macht (Standard: Tag durchstreichen)
+    #[serde(default)]
+    pub fragen: FragenEinstellungen,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -99,5 +102,23 @@ mod tests {
         let wieder = load_from(dir.path()).unwrap();
         assert_eq!(wieder, cfg);
         assert_eq!(wieder.recent_vaults, vec![PathBuf::from("C:/A"), PathBuf::from("C:/B")]);
+    }
+
+    #[test]
+    fn alte_config_ohne_fragen_bleibt_lesbar() {
+        use crate::model::GeklaertModus;
+        let dir = tempfile::tempdir().unwrap();
+        // Stand M2: kein Schlüssel `fragen`
+        fs::write(dir.path().join(CONFIG_FILE), r#"{"version":1,"vaultPath":"C:/V","recentVaults":[],"logbuch":[],"ki":{"modell":""}}"#)
+            .unwrap();
+        let cfg = load_from(dir.path()).unwrap();
+        assert_eq!(cfg.vault_path, Some(PathBuf::from("C:/V")));
+        assert_eq!(cfg.fragen.geklaert_modus, GeklaertModus::Durchstreichen);
+        let mut cfg = cfg;
+        cfg.fragen.geklaert_modus = GeklaertModus::Abschnitt;
+        save_to(dir.path(), &cfg).unwrap();
+        let text = fs::read_to_string(dir.path().join(CONFIG_FILE)).unwrap();
+        assert!(text.contains(r#""geklaertModus": "abschnitt""#), "{text}");
+        assert_eq!(load_from(dir.path()).unwrap(), cfg);
     }
 }

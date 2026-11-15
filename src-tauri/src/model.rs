@@ -780,6 +780,167 @@ pub struct KiStatus {
     pub fehler: Option<String>,
 }
 
+// ---------------------------------------------------------------------------------------------
+// M3: Aufgaben, Fragen, Lücken
+// ---------------------------------------------------------------------------------------------
+
+/// Eine Aufgabe (`- [ ] …`) aus einer Notiz – Nachbau der Dataview-Abfragen in `00 Start/Aufgaben.md`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Arbeitsauftrag {
+    pub path: RelPath,
+    pub title: String,
+    pub kind: NoteKind,
+    pub fach: Option<String>,
+    /// `LF04` (aus dem Feld `lernfeld` der Notiz)
+    pub lernfeld: Option<String>,
+    pub datum: Option<NaiveDate>,
+    /// 1-basierte Zeile in der Datei (inkl. Frontmatter)
+    pub line: usize,
+    /// wie [`Task::text`]: ohne `📅 Datum`
+    pub text: String,
+    pub done: bool,
+    /// Zeichen zwischen den Klammern; TS: `string`
+    pub status_char: char,
+    pub due: Option<NaiveDate>,
+    pub indent: usize,
+    pub privat: bool,
+}
+
+/// Übungsaufgabe aus `07 Material/Aufgabensammlung/`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Lernaufgabe {
+    pub path: RelPath,
+    pub title: String,
+    pub fach: Option<String>,
+    pub lernfeld: Option<String>,
+    pub typ: Option<String>,
+    pub schwierigkeit: Option<String>,
+    /// nur `geloest: true` (YAML-Bool) zählt als gelöst – wie Dataview `geloest != true`
+    pub geloest: bool,
+    /// Linkziel bzw. Alias von `quelle` als Text
+    pub quelle: Option<String>,
+    /// Tag `nochmal`
+    pub nochmal: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AufgabenUebersicht {
+    pub heute: NaiveDate,
+    pub ueberfaellig: Vec<Arbeitsauftrag>,
+    pub diese_woche: Vec<Arbeitsauftrag>,
+    /// App-Extra (nicht auf der Dataview-Seite): Frist nach `heute + 7`
+    pub spaeter: Vec<Arbeitsauftrag>,
+    pub ohne_frist: Vec<Arbeitsauftrag>,
+    pub zuletzt_erledigt: Vec<Arbeitsauftrag>,
+    pub lernaufgaben: Vec<Lernaufgabe>,
+}
+
+/// „Abhaken“ aus der Oberfläche: Aufgabe an `line` mit `text` auf `erledigt` setzen.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AufgabeAbhaken {
+    pub path: RelPath,
+    pub line: usize,
+    /// `Arbeitsauftrag.text`, wie angezeigt
+    pub text: String,
+    /// Zielzustand
+    pub erledigt: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AufgabeErgebnis {
+    /// `None` = war schon so, nichts geschrieben
+    pub report: Option<WriteReport>,
+    /// tatsächliche Zeile der Aufgabe
+    pub line: usize,
+    /// die Aufgabe stand nicht mehr an der angefragten Zeile
+    pub verschoben: bool,
+}
+
+/// Eine `#frage`- oder `#nochmal`-Zeile.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FrageEintrag {
+    pub path: RelPath,
+    pub title: String,
+    pub kind: NoteKind,
+    pub fach: Option<String>,
+    pub datum: Option<NaiveDate>,
+    /// `None` = nur Tag `nochmal` in der Frontmatter (ganze Notiz)
+    pub line: Option<usize>,
+    /// ohne Listenzeichen, Checkbox und Tags `#frage`/`#nochmal`
+    pub text: String,
+    /// Originalzeile, getrimmt (bei `line: None` leer)
+    pub zeile: String,
+    pub privat: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NochmalGruppe {
+    pub fach: Option<String>,
+    pub eintraege: Vec<FrageEintrag>,
+}
+
+/// Was „geklärt“ mit der Zeile macht (SPEC §6.5).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum GeklaertModus {
+    /// Tag wird zu `~~#frage~~`, die Zeile bleibt, wo sie ist
+    #[default]
+    Durchstreichen,
+    /// zusätzlich ans Ende des Abschnitts „Geklärt“ verschieben (fehlt er: am Dateiende anlegen)
+    Abschnitt,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FragenUebersicht {
+    pub fragen: Vec<FrageEintrag>,
+    pub nochmal: Vec<NochmalGruppe>,
+    pub modus: GeklaertModus,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FrageKlaeren {
+    pub path: RelPath,
+    pub line: usize,
+    /// erwartete Originalzeile (getrimmt) – `FrageEintrag.zeile`
+    pub zeile: String,
+    /// `true` = nur berechnen, nichts schreiben
+    pub vorschau: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FrageGeklaert {
+    /// Zeile vorher (getrimmt)
+    pub vorher: String,
+    /// Zeile nachher (getrimmt)
+    pub nachher: String,
+    /// Abschnitt „## Geklärt“ wird am Dateiende angelegt
+    pub abschnitt_neu: bool,
+    /// Modus `abschnitt`: Zeile wandert in den Abschnitt „Geklärt“
+    pub verschoben: bool,
+    /// Zeile der geklärten Frage **nach** der Änderung
+    pub line: usize,
+    /// `None` bei Vorschau
+    pub report: Option<WriteReport>,
+}
+
+/// Einstellungen „Fragen“ (in `config.json`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FragenEinstellungen {
+    #[serde(default)]
+    pub geklaert_modus: GeklaertModus,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -805,6 +966,53 @@ mod tests {
         assert_eq!(wsp.link(), "[[WSP – Wirtschafts- und Sozialprozesse|WSP]]");
         let ddv = Fach { kurz: "D-DV".into(), ziel: "D-DV".into(), lehrkraft: None };
         assert_eq!(ddv.link(), "[[D-DV]]");
+    }
+
+    #[test]
+    fn m3_typen_im_vertrag() {
+        assert_eq!(serde_json::to_value(GeklaertModus::Durchstreichen).unwrap(), "durchstreichen");
+        assert_eq!(serde_json::to_value(GeklaertModus::Abschnitt).unwrap(), "abschnitt");
+        let e: FragenEinstellungen = serde_json::from_value(serde_json::json!({})).unwrap();
+        assert_eq!(e.geklaert_modus, GeklaertModus::Durchstreichen);
+        let e: FragenEinstellungen = serde_json::from_value(serde_json::json!({"geklaertModus": "abschnitt"})).unwrap();
+        assert_eq!(e.geklaert_modus, GeklaertModus::Abschnitt);
+        let a = Arbeitsauftrag {
+            path: "a.md".into(),
+            title: "a".into(),
+            kind: NoteKind::Unterricht,
+            fach: None,
+            lernfeld: Some("LF04".into()),
+            datum: None,
+            line: 3,
+            text: "x".into(),
+            done: false,
+            status_char: ' ',
+            due: NaiveDate::from_ymd_opt(2026, 11, 5),
+            indent: 0,
+            privat: false,
+        };
+        let v = serde_json::to_value(&a).unwrap();
+        assert_eq!(v["statusChar"], " ");
+        assert_eq!(v["due"], "2026-11-05");
+        assert_eq!(v["kind"], "unterricht");
+        let req: AufgabeAbhaken =
+            serde_json::from_value(serde_json::json!({"path": "a.md", "line": 3, "text": "x", "erledigt": true})).unwrap();
+        assert!(req.erledigt);
+        let req: FrageKlaeren =
+            serde_json::from_value(serde_json::json!({"path": "a.md", "line": 3, "zeile": "- x #frage", "vorschau": true})).unwrap();
+        assert!(req.vorschau);
+        let g = FrageGeklaert {
+            vorher: "a".into(),
+            nachher: "b".into(),
+            abschnitt_neu: true,
+            verschoben: true,
+            line: 9,
+            report: None,
+        };
+        assert_eq!(
+            serde_json::to_value(g).unwrap(),
+            serde_json::json!({"vorher": "a", "nachher": "b", "abschnittNeu": true, "verschoben": true, "line": 9, "report": null})
+        );
     }
 
     #[test]

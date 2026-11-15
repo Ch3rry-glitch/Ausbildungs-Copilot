@@ -29,6 +29,37 @@ Logbucheinträge für Moodle. Der Vault bleibt die einzige Wahrheit; Obsidian fu
 - Der Eintragstext wird **nirgends** gespeichert – nur in der Zwischenablage. Im App-Datenordner liegt
   lediglich ein Verlauf „Fach · Datum · Status · Zeitpunkt“ (`logbuch-verlauf.jsonl`).
 
+## Aufgaben und Fragen (M3)
+
+- **Aufgaben** rechnet wie die Dataview-Seite `00 Start/Aufgaben.md`: Quelle sind alle Notizen außer
+  `99 Meta/` und Dateien, deren Name mit `!` beginnt (gilt auch für „Heute“). Listen: Überfällig ·
+  Diese Woche fällig (heute bis heute + 7) · Später fällig (nur in der App) · Ohne Frist (Text länger als
+  3 Zeichen, so fällt der Vorlagen-Platzhalter `- [ ]  📅 ` weg) · Zuletzt erledigt (10, neueste Notiz
+  zuerst). `- [-]` (abgebrochen) zählt nicht als offen – Dataview zeigt sie als offen.
+- **Abhaken** ändert in der Datei **nur das Zeichen zwischen `[` und `]`**: `- [ ]` → `- [x]` (zurück:
+  `- [ ]`). Es wird kein `✅ Datum` angehängt; BOM und CRLF bleiben, alles andere ist byte-gleich. Steht
+  die Aufgabe nicht mehr an ihrer Zeile (in Obsidian verschoben), sucht die App genau eine Aufgabe mit
+  gleichem Text; bei keiner oder mehreren ändert sie nichts („bitte Liste neu laden“). Aufgaben in
+  Codeblöcken sind keine Aufgaben.
+- **Lernaufgaben** kommen aus `07 Material/Aufgabensammlung/` (auch Unterordner, ohne die Übersicht
+  `Aufgabensammlung.md`). Gelöst ist nur `geloest: true` (YAML-Wahrheitswert, wie Dataview
+  `geloest != true`). „Gelöst“ in der App ändert ausschließlich die Zeile `geloest:`; uneinheitlicher
+  Bestand (`typ: Rechnen`, `schwierigkeit: 2`) bleibt unangetastet.
+- **Fragen**: alle Zeilen mit `#frage` (auch `#Frage`, `#frage/…`, nicht `#fragebogen`), mit Quelle und
+  Datum; **Nochmal**: alle `#nochmal`-Zeilen und Notizen mit `nochmal` in den Frontmatter-`tags`,
+  gruppiert nach Fach. Leere Platzhalter aus der Vorlage (`- #frage `) erscheinen nicht.
+- **„Geklärt“** zeigt vorher/nachher und schreibt erst nach Bestätigung. Einstellbar unter
+  *Einstellungen → Fragen*:
+  - *Tag durchstreichen* (Standard): die Zeile bleibt, wo sie ist; jedes `#frage` wird zu `~~#frage~~`
+    (zählt dann für App und Dataview nicht mehr).
+  - *In Abschnitt „Geklärt“ verschieben*: zusätzlich wandert die Zeile (ohne Einrückung) ans Ende des
+    Abschnitts `## Geklärt` der Notiz (Überschrift beliebiger Ebene); fehlt er, legt die App ihn am
+    Dateiende an.
+- Gemischte Zeilenenden oder kaputte Frontmatter: die App ändert nichts und bittet, es in Obsidian zu tun.
+  Notizen unter `10 Privat/` werden angezeigt (markiert); M3 benutzt keine KI.
+- Code: `src-tauri/src/aufgaben.rs` (Listen, Abhaken, gelöst), `src-tauri/src/fragen.rs` (Fragen,
+  Nochmal, geklärt), Tests in `src-tauri/tests/m3_aufgaben.rs`.
+
 ## Installation (für Mitschüler)
 
 1. Unter [Releases](https://github.com/Ch3rry-glitch/Ausbildungs-Copilot/releases) die Datei

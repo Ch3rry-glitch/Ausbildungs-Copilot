@@ -17,14 +17,15 @@ use crate::config::{self, AppConfig};
 use crate::error::{AppError, AppResult};
 use crate::index::{self, VaultIndex};
 use crate::model::{
-    AppStatus, CreateResult, FachInfo, FolderInfo, HeuteTag, KiStatus, LernfeldInfo, LogbuchAnfrage, LogbuchEntwurf,
-    LogbuchFach, LogbuchKopieren, LogbuchKopiert, LogbuchStatus, LogbuchStatusReport, LogbuchTextAnfrage,
-    LogbuchUebersicht, NeueUnterrichtsnotiz, NoteContent, NoteMeta, NoteSummary, NoteVersion, NotizVorschau, RelPath,
-    SaveResult, StarterReport, VaultChanged, WriteReport,
+    AppStatus, AufgabeAbhaken, AufgabeErgebnis, AufgabenUebersicht, CreateResult, FachInfo, FolderInfo, FrageGeklaert,
+    FrageKlaeren, FragenEinstellungen, FragenUebersicht, HeuteTag, KiStatus, LernfeldInfo, LogbuchAnfrage,
+    LogbuchEntwurf, LogbuchFach, LogbuchKopieren, LogbuchKopiert, LogbuchStatus, LogbuchStatusReport,
+    LogbuchTextAnfrage, LogbuchUebersicht, NeueUnterrichtsnotiz, NoteContent, NoteMeta, NoteSummary, NoteVersion,
+    NotizVorschau, RelPath, SaveResult, StarterReport, VaultChanged, WriteReport,
 };
 use crate::watcher::{self, SharedIndex, VaultWatcher};
 use crate::write::{self, RetryPolicy, SaveOutcome, SelfWrites};
-use crate::{guard, heute as heute_mod, ki, logbuch, obsidian, starter, unterricht};
+use crate::{aufgaben, fragen, guard, heute as heute_mod, ki, logbuch, obsidian, starter, unterricht};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
 pub const EVENT_VAULT_CHANGED: &str = "vault-changed";
@@ -266,17 +267,21 @@ pub async fn reindex(app: AppHandle, state: State<'_, AppState>) -> Result<AppSt
 // M1: Heute und Unterricht
 // ---------------------------------------------------------------------------------------------
 
+/// `JJJJ-MM-TT` aus der Oberfläche; fehlt oder leer → der Tag von `jetzt`.
+fn datum_oder(datum: Option<String>, jetzt: NaiveDateTime) -> AppResult<NaiveDate> {
+    match datum.as_deref().map(str::trim).filter(|d| !d.is_empty()) {
+        Some(d) => NaiveDate::parse_from_str(d, "%Y-%m-%d").map_err(|_| AppError::InvalidInput(format!("Ungültiges Datum „{d}“."))),
+        None => Ok(jetzt.date()),
+    }
+}
+
 /// Tagesansicht. `datum` = `JJJJ-MM-TT`, `None` = heute.
 #[tauri::command]
 pub async fn heute(state: State<'_, AppState>, datum: Option<String>) -> Result<HeuteTag, AppError> {
     let root = state.root()?;
     let index = state.index.clone();
     let jetzt = jetzt();
-    let datum = match datum.as_deref().map(str::trim).filter(|d| !d.is_empty()) {
-        Some(d) => NaiveDate::parse_from_str(d, "%Y-%m-%d")
-            .map_err(|_| AppError::InvalidInput(format!("Ungültiges Datum „{d}“.")))?,
-        None => jetzt.date(),
-    };
+    let datum = datum_oder(datum, jetzt)?;
     blocking(move || {
         let (plan, status) = unterricht::load_stundenplan(&root, &RetryPolicy::short());
         with_index(&index, |idx| Ok(heute_mod::heute(idx, plan.as_ref(), status, datum, jetzt)))
@@ -639,6 +644,109 @@ pub async fn logbuch_status_setzen(
         Ok(report)
     })
     .await
+}
+
+// ---------------------------------------------------------------------------------------------
+// M3: Aufgaben, Fragen, Lücken
+// ---------------------------------------------------------------------------------------------
+
+/// Seite „Aufgaben“. `datum` = `JJJJ-MM-TT`, `None` = heute (Debug: `COCKPIT_NOW`). Schreibt nichts.
+#[tauri::command]
+pub async fn aufgaben_uebersicht(state: State<'_, AppState>, datum: Option<String>) -> Result<AufgabenUebersicht, AppError> {
+    let index = state.index.clone();
+    let heute = datum_oder(datum, jetzt())?;
+    blocking(move || with_index(&index, |idx| Ok(aufgaben::uebersicht(idx, heute)))).await
+}
+
+/// Aufgabe abhaken bzw. wieder öffnen: ändert in der Datei nur das Zeichen zwischen `[` und `]`.
+#[tauri::command]
+pub async fn aufgabe_abhaken(app: AppHandle, state: State<'_, AppState>, req: AufgabeAbhaken) -> Result<AufgabeErgebnis, AppError> {
+    let root = state.root()?;
+    ensure_write_allowed(&root)?;
+    let ziel = StatusZiel::von(&state, root);
+    blocking(move || {
+        let _schreibsperre = ziel.lock.lock().unwrap_or_else(|e| e.into_inner());
+        let erg = aufgaben::abhaken(&ziel.root, &req, &ziel.writes, &RetryPolicy::write())?;
+        if let Some(r) = &erg.report {
+            index_own_write(&app, &ziel.index, &ziel.root, &r.rel_path);
+        }
+        Ok(erg)
+    })
+    .await
+}
+
+/// `geloest: true|false` einer Lernaufgabe setzen. `None` = war schon so.
+#[tauri::command]
+pub async fn lernaufgabe_geloest(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    path: RelPath,
+    geloest: bool,
+) -> Result<Option<WriteReport>, AppError> {
+    let root = state.root()?;
+    ensure_write_allowed(&root)?;
+    let ziel = StatusZiel::von(&state, root);
+    blocking(move || {
+        let _schreibsperre = ziel.lock.lock().unwrap_or_else(|e| e.into_inner());
+        let report = aufgaben::lernaufgabe_geloest(&ziel.root, &path, geloest, &ziel.writes, &RetryPolicy::write())?;
+        if let Some(r) = &report {
+            index_own_write(&app, &ziel.index, &ziel.root, &r.rel_path);
+        }
+        Ok(report)
+    })
+    .await
+}
+
+impl AppState {
+    fn fragen_konfig(&self) -> FragenEinstellungen {
+        self.config.lock().unwrap().fragen.clone()
+    }
+}
+
+/// Offene Fragen und „nochmal ansehen“. Schreibt nichts.
+#[tauri::command]
+pub async fn fragen_uebersicht(state: State<'_, AppState>) -> Result<FragenUebersicht, AppError> {
+    let index = state.index.clone();
+    let modus = state.fragen_konfig().geklaert_modus;
+    blocking(move || with_index(&index, |idx| Ok(fragen::uebersicht(idx, modus)))).await
+}
+
+/// Frage als geklärt markieren (Modus aus den Einstellungen). `vorschau: true` schreibt nichts.
+#[tauri::command]
+pub async fn frage_klaeren(app: AppHandle, state: State<'_, AppState>, req: FrageKlaeren) -> Result<FrageGeklaert, AppError> {
+    let root = state.root()?;
+    // auch für die Vorschau: der Dialog soll nichts versprechen, was das Speichern ablehnt
+    ensure_write_allowed(&root)?;
+    let modus = state.fragen_konfig().geklaert_modus;
+    let ziel = StatusZiel::von(&state, root);
+    blocking(move || {
+        let _schreibsperre = ziel.lock.lock().unwrap_or_else(|e| e.into_inner());
+        let erg = fragen::klaeren(&ziel.root, &req, modus, &ziel.writes, &RetryPolicy::write())?;
+        if let Some(r) = &erg.report {
+            index_own_write(&app, &ziel.index, &ziel.root, &r.rel_path);
+        }
+        Ok(erg)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn fragen_einstellungen(state: State<'_, AppState>) -> Result<FragenEinstellungen, AppError> {
+    Ok(state.fragen_konfig())
+}
+
+#[tauri::command]
+pub async fn fragen_einstellungen_speichern(
+    state: State<'_, AppState>,
+    einstellungen: FragenEinstellungen,
+) -> Result<FragenEinstellungen, AppError> {
+    let mut cfg = state.config.lock().unwrap();
+    let alt = std::mem::replace(&mut cfg.fragen, einstellungen);
+    if let Err(e) = config::save_to(&state.config_dir, &cfg) {
+        cfg.fragen = alt;
+        return Err(e);
+    }
+    Ok(cfg.fragen.clone())
 }
 
 fn ki_status_jetzt(state: &AppState) -> KiStatus {

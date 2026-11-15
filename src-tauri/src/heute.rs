@@ -3,10 +3,11 @@
 
 use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime, NaiveTime, Timelike, Weekday};
 
+use crate::aufgaben;
 use crate::index::VaultIndex;
 use crate::model::{
-    Block, FachInfo, FaelligeAufgabe, FaelligeAufgaben, HeuteBlock, HeuteTag, NoteKind, NoteMeta, NoteSummary,
-    Stundenplan, StundenplanStatus, TagArt, Wochentag,
+    Block, FachInfo, FaelligeAufgabe, FaelligeAufgaben, HeuteBlock, HeuteTag, NoteMeta, NoteSummary, Stundenplan,
+    StundenplanStatus, TagArt, Wochentag,
 };
 use crate::unterricht::{self, block_nr, fach_fuer_block, fach_matches, is_unterricht_note, UNTERRICHT_DIR};
 use crate::vault::naming;
@@ -43,12 +44,13 @@ pub fn aktueller_block(bloecke: &[Block], now: NaiveTime) -> Option<usize> {
         .or_else(|| zeiten.iter().position(|z| z.is_some_and(|(b, _)| b >= now)))
 }
 
-/// Offene Aufgaben mit Frist, relativ zum **angezeigten** Tag.
+/// Offene Aufgaben mit Frist, relativ zum **angezeigten** Tag. Quelle wie die Seite „Aufgaben“
+/// ([`aufgaben::zaehlt_als_quelle`]: ohne `99 Meta`, ohne `!…`-Dateien).
 pub fn faellige_aufgaben(idx: &VaultIndex, datum: NaiveDate) -> FaelligeAufgaben {
     let mut out = FaelligeAufgaben::default();
     let bis = datum + Duration::days(7);
-    for m in idx.notes().filter(|m| m.kind != NoteKind::Template) {
-        for t in m.tasks.iter().filter(|t| !t.done && t.status_char != '-') {
+    for m in idx.notes().filter(|m| aufgaben::zaehlt_als_quelle(m)) {
+        for t in m.tasks.iter().filter(|t| aufgaben::ist_offen(t)) {
             let Some(due) = t.due else { continue };
             let a = FaelligeAufgabe {
                 path: m.path.clone(),
@@ -251,7 +253,7 @@ pub fn heute(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{NoteMeta, Task};
+    use crate::model::{NoteKind, NoteMeta, Task};
     use crate::vault::stundenplan;
 
     fn d(y: i32, m: u32, t: u32) -> NaiveDate {
@@ -345,6 +347,9 @@ mod tests {
             vec![(5, ' ', Some(heute))],
         ));
         idx.insert_meta(note_mit_aufgaben("10 Privat/x.md", NoteKind::Sonstige, vec![(3, ' ', Some(d(2026, 1, 1)))]));
+        // gleicher Quellfilter wie `00 Start/Aufgaben.md`: kein `!`-Entwurf, nichts unter „99 Meta“
+        idx.insert_meta(note_mit_aufgaben("00 Start/!Entwurf.md", NoteKind::Sonstige, vec![(2, ' ', Some(heute))]));
+        idx.insert_meta(note_mit_aufgaben("05 Lernen/99 Meta alt/y.md", NoteKind::Sonstige, vec![(2, ' ', Some(heute))]));
         let a = faellige_aufgaben(&idx, heute);
         let lines = |v: &[FaelligeAufgabe]| v.iter().map(|x| (x.path.clone(), x.line)).collect::<Vec<_>>();
         assert_eq!(
