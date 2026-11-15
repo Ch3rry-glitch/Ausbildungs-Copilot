@@ -1,13 +1,17 @@
-// Startansicht „Heute“: Tageswechsler, Stundenplan-Blöcke, Betriebstag/Wochenende, fällige Aufgaben.
+// Startansicht „Heute“: Tageswechsler, Stundenplan-Blöcke, Betriebstag/Wochenende, fällige Aufgaben,
+// offene Logbucheinträge.
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  aeltesterOffen,
   api,
   errorText,
   formatDatum,
+  formatTagDatum,
   stdText,
   type FaelligeAufgabe,
   type HeuteBlock,
   type HeuteTag,
+  type LogbuchUebersicht,
   type NeueUnterrichtsnotiz,
   type NoteSummary,
   type VaultChanged,
@@ -25,10 +29,12 @@ export function HeuteView({
   change,
   onOpenNote,
   onCreate,
+  onOpenLogbuch,
 }: {
   change: { seq: number; data: VaultChanged } | null;
   onOpenNote: (path: string, line?: number) => void;
   onCreate: (initial: Partial<NeueUnterrichtsnotiz>) => void;
+  onOpenLogbuch: (fach: string) => void;
 }) {
   // null = heute (das Datum liefert das Backend, nie new Date() in UTC)
   const [date, setDate] = useState<string | null>(null);
@@ -54,9 +60,29 @@ export function HeuteView({
     void load();
   }, [load]);
 
+  // Offene Logbucheinträge (Karte verschwindet ohne aktives Fach oder bei Fehlern)
+  const [logbuch, setLogbuch] = useState<LogbuchUebersicht | null>(null);
+  const logbuchSeq = useRef(0);
+  const loadLogbuch = useCallback(async () => {
+    logbuchSeq.current += 1;
+    const mine = logbuchSeq.current;
+    try {
+      const u = await api.logbuchUebersicht();
+      if (mine === logbuchSeq.current) setLogbuch(u);
+    } catch {
+      if (mine === logbuchSeq.current) setLogbuch(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadLogbuch();
+  }, [loadLogbuch]);
+
   // Jede Vault-Änderung (auch eigene Schreibvorgänge) → neu laden
   useEffect(() => {
-    if (change) void load();
+    if (!change) return;
+    void load();
+    void loadLogbuch();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [change?.seq]);
 
@@ -182,23 +208,49 @@ export function HeuteView({
           )}
         </div>
 
-        <section className="panel glass heute-side">
-          <div className="panel-head">
-            <span className="panel-title">Fällige Aufgaben</span>
-            {a && a.ueberfaellig.length > 0 && <span className="badge red">{a.ueberfaellig.length} überfällig</span>}
-          </div>
-          <div className="panel-body">
-            {tag && aufgabenLeer && <div className="hint pad">Keine fälligen Aufgaben.</div>}
-            {a && (
-              <>
-                <TaskGroup title="Überfällig" items={a.ueberfaellig} red onOpenNote={onOpenNote} />
-                <TaskGroup title="Heute" items={a.heute} onOpenNote={onOpenNote} />
-                <TaskGroup title="Nächste 7 Tage" items={a.naechsteTage} onOpenNote={onOpenNote} />
-              </>
-            )}
-            <div className="hint pad">Abhaken kommt mit M3.</div>
-          </div>
-        </section>
+        <div className="heute-side-col">
+          {logbuch && logbuch.faecher.length > 0 && (
+            <section className="panel glass heute-logbuch">
+              <div className="panel-head">
+                <span className="panel-title">Offene Logbucheinträge</span>
+              </div>
+              <div className="panel-body">
+                {logbuch.faecher.map((f) => {
+                  const aeltester = aeltesterOffen(f);
+                  return (
+                    <button key={f.kurz} className="note-item" onClick={() => onOpenLogbuch(f.kurz)} title={f.ziel}>
+                      <div className="note-title">
+                        {f.kurz} · {f.offen} offen
+                      </div>
+                      <div className="note-meta">
+                        {aeltester ? <span>ältester: {formatTagDatum(aeltester.datum)}</span> : <span>nichts offen</span>}
+                        {f.kopiert > 0 && <span className="badge lilac">{f.kopiert} kopiert</span>}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+
+          <section className="panel glass heute-side">
+            <div className="panel-head">
+              <span className="panel-title">Fällige Aufgaben</span>
+              {a && a.ueberfaellig.length > 0 && <span className="badge red">{a.ueberfaellig.length} überfällig</span>}
+            </div>
+            <div className="panel-body">
+              {tag && aufgabenLeer && <div className="hint pad">Keine fälligen Aufgaben.</div>}
+              {a && (
+                <>
+                  <TaskGroup title="Überfällig" items={a.ueberfaellig} red onOpenNote={onOpenNote} />
+                  <TaskGroup title="Heute" items={a.heute} onOpenNote={onOpenNote} />
+                  <TaskGroup title="Nächste 7 Tage" items={a.naechsteTage} onOpenNote={onOpenNote} />
+                </>
+              )}
+              <div className="hint pad">Abhaken kommt mit M3.</div>
+            </div>
+          </section>
+        </div>
       </div>
     </>
   );

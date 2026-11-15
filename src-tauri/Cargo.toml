@@ -24,15 +24,20 @@ tauri-build = { version = "2", features = [] }
 chrono = { version = "0.4.45", features = ["serde"] }
 dirs = "7.0.0"
 include_dir = "0.7.4"
+# KI-Schlüssel im Windows-Anmeldeinformationsspeicher (nie in einer Datei); 3.x passt zu rust-version 1.80
+keyring = { version = "3.6.3", features = ["windows-native"] }
 notify = "8.2.0"
 notify-debouncer-mini = "0.7.0"
 regex = "1.13.1"
+# Anthropic Messages API (M2). 0.12 statt 0.13: passt zu rust-version 1.80; TLS über Windows (schannel)
+reqwest = { version = "0.12.28", default-features = false, features = ["blocking", "json", "default-tls"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 serde_yaml = "0.9.34"
 # 0.10.x: steckt über tauri schon im Cargo.lock und passt zu rust-version 1.80 (0.11 braucht 1.88)
 sha2 = "0.10.9"
 tauri = { version = "2", features = [] }
+tauri-plugin-clipboard-manager = "2.3.3"
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
 # Temporärdateien für atomares Schreiben in den Vault (write.rs)

@@ -35,6 +35,15 @@ pub enum AppError {
     InvalidInput(String),
     #[error("Entwicklungs-Build: Schreiben ist nur in einer Vault-Kopie unter %TEMP% erlaubt (oder COCKPIT_DEV_WRITE=1 setzen).")]
     DevWriteBlocked,
+    /// Regel 2: ohne Zahl kein Kopieren
+    #[error("Bitte zuerst die Bewertung (1–{0}) eintragen – ohne Zahl wird nicht kopiert.")]
+    BewertungFehlt(u8),
+    #[error("Kein KI-Schlüssel hinterlegt – Einstellungen → KI, oder „Ohne KI befüllen“.")]
+    KiKeinSchluessel,
+    #[error("KI: {0}")]
+    Ki(String),
+    #[error("Zwischenablage: {0}")]
+    Zwischenablage(String),
 }
 
 impl Serialize for AppError {

@@ -37,4 +37,8 @@ export const Icon: Record<string, ReactElement> = {
   clock: p(["M12 3a9 9 0 1 0 0 18a9 9 0 0 0 0-18z", "M12 7v5l3 2"]),
   chevronLeft: p(["M15 18l-6-6l6-6"]),
   chevronRight: p(["M9 18l6-6l-6-6"]),
+  // M2
+  kopieren: p(["M11 9h9a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-9a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2z", "M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"]),
+  check: p(["M20 6L9 17l-5-5"]),
+  chevronDown: p(["M6 9l6 6l6-6"]),
 };

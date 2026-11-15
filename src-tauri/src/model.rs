@@ -507,9 +507,293 @@ pub enum CreateResult {
     Exists { rel_path: RelPath },
 }
 
+// ---------------------------------------------------------------------------------------------
+// M2: Logbuch
+// ---------------------------------------------------------------------------------------------
+
+/// `logbuch:` in der Frontmatter der Unterrichtsnotiz – das **einzige**, was M2 in den Vault schreibt.
+/// Fehlt der Schlüssel, gilt `offen`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum LogbuchStatus {
+    Offen,
+    Kopiert,
+    Abgegeben,
+}
+
+impl LogbuchStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            LogbuchStatus::Offen => "offen",
+            LogbuchStatus::Kopiert => "kopiert",
+            LogbuchStatus::Abgegeben => "abgegeben",
+        }
+    }
+
+    /// Wert aus der Frontmatter; Unbekanntes und Leeres zählt als `offen`.
+    pub fn from_text(s: &str) -> Self {
+        match s.trim().to_lowercase().as_str() {
+            "kopiert" => LogbuchStatus::Kopiert,
+            "abgegeben" => LogbuchStatus::Abgegeben,
+            _ => LogbuchStatus::Offen,
+        }
+    }
+}
+
+/// Woraus ein Abschnitt des Eintrags befüllt wird.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AbschnittQuelle {
+    /// „Inhalt der Stunde“, „Merksätze“, „Wichtige Begriffe“
+    Erarbeitet,
+    /// `#frage`-Zeilen, „Offene Fragen“, „Noch nicht verstanden“
+    Fragen,
+    /// offene Aufgaben der Notiz, anstehende Klausuren des Fachs
+    Naechstes,
+    /// bleibt leer (der Nutzer füllt selbst)
+    Leer,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Umlaute {
+    Erhalten,
+    /// ä → ae, ö → oe, ü → ue, ß → ss (ältere GEC-Einträge)
+    Umschreiben,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LogbuchAbschnitt {
+    pub titel: String,
+    pub quelle: AbschnittQuelle,
+}
+
+/// Logbuch-Konfiguration eines Fachs (App-Datenordner, nie im Vault).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LogbuchFach {
+    pub kurz: String,
+    pub aktiv: bool,
+    /// leer = nicht gesetzt → Moodle-Startseite
+    #[serde(default)]
+    pub moodle_url: String,
+    pub abschnitte: Vec<LogbuchAbschnitt>,
+    /// Skala-Maximum (GEC: 10) oder `None` = keine Selbstbewertung
+    #[serde(default)]
+    pub selbstbewertung: Option<u8>,
+    pub bewertung_titel: String,
+    pub eintraege_pro_woche: u8,
+    pub umlaute: Umlaute,
+    pub markdown_entfernen: bool,
+    /// ältere Unterrichtstage zählen nicht als offen
+    #[serde(default)]
+    pub offen_ab: Option<NaiveDate>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LogbuchNotiz {
+    pub path: RelPath,
+    pub title: String,
+    pub thema: Option<String>,
+    pub status: LogbuchStatus,
+    pub block: u8,
+    pub privat: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LogbuchTag {
+    pub datum: NaiveDate,
+    /// der „niedrigste“ Status der Notizen des Tages
+    pub status: LogbuchStatus,
+    /// `false`, wenn vor `offen_ab`
+    pub zaehlt: bool,
+    pub notizen: Vec<LogbuchNotiz>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LogbuchFachTage {
+    pub kurz: String,
+    pub ziel: String,
+    /// wirksame Adresse (leer → Moodle-Startseite)
+    pub moodle_url: String,
+    pub eintraege_pro_woche: u8,
+    pub offen_ab: Option<NaiveDate>,
+    /// neueste zuerst
+    pub tage: Vec<LogbuchTag>,
+    pub offen: usize,
+    pub kopiert: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LogbuchUebersicht {
+    pub faecher: Vec<LogbuchFachTage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LogbuchAnfrage {
+    pub fach: String,
+    pub datum: NaiveDate,
+    pub mit_ki: bool,
+    /// gilt nur für **diesen** Vorgang (Regel 10)
+    #[serde(default)]
+    pub privat_erlauben: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Punkt {
+    pub text: String,
+    /// von der KI vorgeschlagen (nicht aus der Notiz) – in der Vorschau markiert
+    pub vorschlag: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EntwurfAbschnitt {
+    pub titel: String,
+    pub quelle: AbschnittQuelle,
+    pub punkte: Vec<Punkt>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BewertungFeld {
+    pub titel: String,
+    pub skala: u8,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LogbuchQuelle {
+    pub path: RelPath,
+    pub title: String,
+    pub status: LogbuchStatus,
+    pub privat: bool,
+    /// mit KI: wurde gesendet; ohne KI: würde gesendet
+    pub gesendet: bool,
+    /// EK-Zeilen wurden vor dem Senden entfernt (Regel 6)
+    pub ek_entfernt: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KiAufruf {
+    pub modell: String,
+    pub eingabe_tokens: u64,
+    pub ausgabe_tokens: u64,
+    pub kosten_usd: f64,
+    pub versuche: u32,
+}
+
+/// Bearbeitbarer Entwurf. Lebt nur in der Oberfläche – nie im Vault, nie in einer Datei (Regel 1).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LogbuchEntwurf {
+    pub fach: String,
+    pub datum: NaiveDate,
+    /// `TT.MM.JJJJ`
+    pub kopfzeile: String,
+    pub abschnitte: Vec<EntwurfAbschnitt>,
+    pub bewertung: Option<BewertungFeld>,
+    pub quellen: Vec<LogbuchQuelle>,
+    pub status: LogbuchStatus,
+    pub moodle_url: String,
+    pub mit_ki: bool,
+    pub ki: Option<KiAufruf>,
+    pub warnungen: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TextAbschnitt {
+    pub titel: String,
+    pub punkte: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LogbuchTextAnfrage {
+    pub fach: String,
+    pub datum: NaiveDate,
+    pub abschnitte: Vec<TextAbschnitt>,
+    /// vom Nutzer eingetragen – die App füllt sie nie aus (Regel 2)
+    pub bewertung: Option<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LogbuchKopieren {
+    pub fach: String,
+    pub datum: NaiveDate,
+    pub abschnitte: Vec<TextAbschnitt>,
+    pub bewertung: Option<u8>,
+    pub pfade: Vec<RelPath>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StatusFehler {
+    pub path: RelPath,
+    pub meldung: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LogbuchStatusReport {
+    pub geschrieben: Vec<WriteReport>,
+    pub unveraendert: Vec<RelPath>,
+    pub fehler: Vec<StatusFehler>,
+    /// Sicherungsordner, wenn mehr als eine Datei geändert wurde (SPEC §9)
+    pub sicherung: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LogbuchKopiert {
+    pub moodle_url: String,
+    pub moodle_geoeffnet: bool,
+    pub moodle_fehler: Option<String>,
+    pub status: LogbuchStatusReport,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KiModell {
+    pub id: String,
+    pub name: String,
+    pub eingabe_usd_pro_mio: f64,
+    pub ausgabe_usd_pro_mio: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KiStatus {
+    pub schluessel_gespeichert: bool,
+    pub modell: String,
+    pub modelle: Vec<KiModell>,
+    pub fehler: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn logbuch_status_aus_text() {
+        assert_eq!(LogbuchStatus::from_text(" Kopiert "), LogbuchStatus::Kopiert);
+        assert_eq!(LogbuchStatus::from_text("abgegeben"), LogbuchStatus::Abgegeben);
+        assert_eq!(LogbuchStatus::from_text(""), LogbuchStatus::Offen);
+        assert_eq!(LogbuchStatus::from_text("vielleicht"), LogbuchStatus::Offen);
+        assert!(LogbuchStatus::Offen < LogbuchStatus::Kopiert && LogbuchStatus::Kopiert < LogbuchStatus::Abgegeben);
+        assert_eq!(serde_json::to_value(LogbuchStatus::Abgegeben).unwrap(), "abgegeben");
+        assert_eq!(serde_json::to_value(AbschnittQuelle::Naechstes).unwrap(), "naechstes");
+    }
 
     #[test]
     fn fach_link_hat_immer_vollstaendiges_ziel() {

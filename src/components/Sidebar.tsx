@@ -1,16 +1,16 @@
 import type { AppStatus } from "../api";
 import { Icon } from "../icons";
 
-export type View = "heute" | "unterricht" | "notizen" | "einstellungen";
+export type View = "heute" | "unterricht" | "logbuch" | "notizen" | "einstellungen";
 
 // Reihenfolge laut SPEC §8. Noch nicht gebaute Bereiche zeigen ihren Meilenstein.
 const ACTIVE: { key: View; label: string }[] = [
   { key: "heute", label: "Heute" },
   { key: "unterricht", label: "Unterricht" },
+  { key: "logbuch", label: "Logbuch" },
 ];
 
 const SOON: { key: string; label: string; milestone: string }[] = [
-  { key: "logbuch", label: "Logbuch", milestone: "M2" },
   { key: "aufgaben", label: "Aufgaben", milestone: "M3" },
   { key: "fragen", label: "Fragen", milestone: "M3" },
   { key: "berichtsheft", label: "Berichtsheft", milestone: "M4" },
@@ -23,11 +23,14 @@ export function Sidebar({
   onView,
   status,
   editorDirty,
+  logbuchOffen,
 }: {
   view: View;
   onView: (v: View) => void;
   status: AppStatus;
   editorDirty: boolean;
+  /** Zahl offener Logbucheinträge; null = keine Anzeige */
+  logbuchOffen: number | null;
 }) {
   return (
     <aside className="sidebar glass">
@@ -44,6 +47,11 @@ export function Sidebar({
           {Icon[it.key]}
           {it.label}
           {it.key === "unterricht" && editorDirty && <span className="nav-dot" title="Ungespeicherte Änderungen" />}
+          {it.key === "logbuch" && logbuchOffen != null && logbuchOffen > 0 && (
+            <span className="nav-count" title={logbuchOffen === 1 ? "1 offener Logbucheintrag" : `${logbuchOffen} offene Logbucheinträge`}>
+              {logbuchOffen}
+            </span>
+          )}
         </button>
       ))}
 
