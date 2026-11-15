@@ -28,7 +28,7 @@ use crate::model::{
     LogbuchFach, LogbuchFachTage, LogbuchNotiz, LogbuchQuelle, LogbuchStatus, LogbuchStatusReport, LogbuchTag,
     LogbuchUebersicht, NoteMeta, Punkt, RelPath, StatusFehler, TextAbschnitt, Umlaute, WriteReport,
 };
-use crate::unterricht::{block_nr, fach_matches, is_unterricht_note, validate_kurz};
+use crate::unterricht::{block_nr, fach_matches, is_unterricht_note};
 use crate::vault::frontmatter::{field_as_text, NoteText};
 use crate::vault::prose_lines;
 use crate::write::{self, RetryPolicy, SaveOutcome, SelfWrites};
@@ -115,7 +115,11 @@ pub fn pruefe_einstellungen(liste: Vec<LogbuchFach>) -> AppResult<Vec<LogbuchFac
     let mut out: Vec<LogbuchFach> = Vec::with_capacity(liste.len());
     for mut f in liste {
         f.kurz = f.kurz.trim().to_string();
-        validate_kurz(&f.kurz)?;
+        // Das Kürzel ist hier nur ein Schlüssel in config.json (nie ein Dateiname): es kommt so aus
+        // dem Fach-Verzeichnis (Stundenplan-Zelle, Titel in „01 Fächer“) und muss unverändert zurück.
+        if f.kurz.is_empty() || f.kurz.chars().count() > 80 || f.kurz.contains(['\n', '\r']) {
+            return ungueltig(format!("Das Fach „{}“ hat kein brauchbares Kürzel (eine Zeile, höchstens 80 Zeichen).", f.kurz));
+        }
         if out.iter().any(|o| o.kurz.eq_ignore_ascii_case(&f.kurz)) {
             return ungueltig(format!("Das Fach „{}“ steht doppelt in den Einstellungen.", f.kurz));
         }
@@ -1110,6 +1114,14 @@ Das ist als naechstes zu tun:\n- \n\nBewertung dieser Lerneinheit: __/10"
         assert!(pruefe_einstellungen(vec![f.clone(), f.clone()]).is_err());
         f.selbstbewertung = Some(1);
         assert!(pruefe_einstellungen(vec![f]).is_err());
+        // Kürzel aus dem Fach-Verzeichnis, die kein Dateiname sein könnten, lassen sich trotzdem speichern
+        let mut sport = voreinstellung("Sport / Gesundheit");
+        sport.aktiv = true;
+        let englisch = voreinstellung("Englisch Business");
+        let ok = pruefe_einstellungen(vec![gec(), sport, englisch]).unwrap();
+        assert_eq!(ok[1].kurz, "Sport / Gesundheit");
+        assert!(pruefe_einstellungen(vec![voreinstellung("  ")]).is_err());
+        assert!(pruefe_einstellungen(vec![voreinstellung("a\nb")]).is_err());
         assert_eq!(moodle_url(&gec()), MOODLE_START);
     }
 

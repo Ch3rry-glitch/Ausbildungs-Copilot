@@ -136,7 +136,8 @@ export function mainEditorExtensions(
       },
       ...searchKeymap,
       ...historyKeymap,
-      ...defaultKeymap,
+      // Strg+L gehört der App (Logbuch für die geöffnete Notiz), nicht „Zeile auswählen“
+      ...defaultKeymap.filter((b) => b.key !== "Mod-l"),
     ]),
     EditorView.updateListener.of((u) => {
       if (u.docChanged) onChange();

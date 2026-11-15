@@ -1,7 +1,7 @@
 // Handgeschriebene CodeMirror-Hülle (kein @uiw/react-codemirror). Die Ansicht wird einmal erzeugt;
 // jeder Notizwechsel baut einen frischen EditorState (eigener Verlauf je Notiz).
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
-import { Compartment, EditorState } from "@codemirror/state";
+import { Compartment, EditorState, Transaction } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { editorBase, mainEditorExtensions } from "../editor/setup";
 
@@ -12,6 +12,9 @@ export interface NoteEditorHandle {
   /** stilles Nachladen von außen (nur bei sauberem Puffer): frischer Zustand mit leerem Verlauf,
    *  Cursor begrenzt, Scrollposition bleibt */
   replaceDoc(text: string): void;
+  /** stilles Nachladen einer kleinen Änderung von außen (z. B. `logbuch:` in der Frontmatter): nur der
+   *  geänderte Ausschnitt wird ersetzt, außerhalb des Verlaufs – Cursor und Strg+Z bleiben gültig */
+  applyExternal(text: string): void;
   setReadonly(b: boolean): void;
   /** 1-basiert; scrollt hin und setzt den Cursor an den Zeilenanfang */
   revealLine(n: number): void;
@@ -77,6 +80,22 @@ export const NoteEditor = forwardRef<NoteEditorHandle, { onSave: () => void; onC
         v.scrollDOM.scrollTop = top;
         requestAnimationFrame(() => {
           if (view.current === v) v.scrollDOM.scrollTop = top;
+        });
+      },
+      applyExternal: (text) => {
+        const v = view.current;
+        if (!v) return;
+        const alt = v.state.doc.toString();
+        if (alt === text) return;
+        // gemeinsamer Anfang und gemeinsames Ende → eine minimale Änderung
+        const max = Math.min(alt.length, text.length);
+        let a = 0;
+        while (a < max && alt.charCodeAt(a) === text.charCodeAt(a)) a++;
+        let b = 0;
+        while (b < max - a && alt.charCodeAt(alt.length - 1 - b) === text.charCodeAt(text.length - 1 - b)) b++;
+        v.dispatch({
+          changes: { from: a, to: alt.length - b, insert: text.slice(a, text.length - b) },
+          annotations: Transaction.addToHistory.of(false),
         });
       },
       setReadonly: (b) => {

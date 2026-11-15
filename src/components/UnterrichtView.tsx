@@ -35,6 +35,8 @@ export type EditorHandle = {
 interface Loaded {
   path: string;
   title: string;
+  /** Fach-Kürzel aus der Frontmatter (für „Logbuch erzeugen“) */
+  fach: string | null;
   base: { text: string; version: NoteVersion };
   editable: boolean;
   readonlyReason: string | null;
@@ -57,6 +59,7 @@ function fromContent(c: NoteContent): Loaded {
   return {
     path: c.meta.path,
     title: c.meta.title,
+    fach: c.meta.fach,
     base: { text: c.text, version: c.version },
     editable: c.editable,
     readonlyReason: c.readonlyReason,
@@ -84,6 +87,7 @@ export function UnterrichtView({
   editorRef,
   onDirtyChange,
   onCreate,
+  onLogbuch,
 }: {
   active: boolean;
   vaultPath: string | null;
@@ -92,6 +96,8 @@ export function UnterrichtView({
   editorRef: RefObject<EditorHandle | null>;
   onDirtyChange: (dirty: boolean) => void;
   onCreate: (initial: Partial<NeueUnterrichtsnotiz>) => void;
+  /** Logbuch für die geöffnete (gespeicherte) Notiz erzeugen */
+  onLogbuch: (path: string) => void;
 }) {
   const { notify } = useToast();
   const ed = useRef<NoteEditorHandle>(null);
@@ -102,6 +108,8 @@ export function UnterrichtView({
   const [fachFilter, setFachFilter] = useState<string | null>(null);
   const [listError, setListError] = useState<string | null>(null);
   const listSeq = useRef(0);
+  // Kürzel und Linkziele (klein) der Fächer mit aktivem Logbuch
+  const [logbuchFaecher, setLogbuchFaecher] = useState<Set<string>>(new Set());
 
   // ---------- Editor ----------
   const [loaded, loadedRef, setLoaded] = useRefState<Loaded | null>(null);
@@ -159,6 +167,27 @@ export function UnterrichtView({
     } catch {
       // Filter-Pillen sind Komfort; Fehler zeigt die Liste
     }
+  }
+
+  async function refreshLogbuchFaecher() {
+    try {
+      // Übersicht = nur aktive Fächer, mit Linkziel – dieselbe Zuordnung wie im Backend (fach_matches)
+      const u = await api.logbuchUebersicht();
+      setLogbuchFaecher(new Set(u.faecher.flatMap((f) => [f.kurz.toLowerCase(), f.ziel.toLowerCase()])));
+    } catch {
+      // ohne Einstellungen kein Knopf „Logbuch erzeugen“; Strg+L bleibt möglich
+      setLogbuchFaecher(new Set());
+    }
+  }
+
+  function logbuchErzeugen() {
+    const l = loadedRef.current;
+    if (!l) return;
+    if (dirtyRef.current) {
+      notify({ kind: "info", text: "Erst speichern – dann Logbuch erzeugen." });
+      return;
+    }
+    onLogbuch(l.path);
   }
 
   // ---------- Speichern ----------
@@ -330,7 +359,7 @@ export function UnterrichtView({
 
   // ---------- Änderungen von außen ----------
   /** Ablauf „Datei geändert“: ausgewertet, wenn readNote zurückkommt, nicht beim Ereignis. */
-  async function checkDisk() {
+  async function checkDisk(opts?: { minimal?: boolean }) {
     const l0 = loadedRef.current;
     if (!l0) return;
     const path = l0.path;
@@ -372,7 +401,9 @@ export function UnterrichtView({
     if (!dirtyRef.current) {
       // still nachladen, nicht im Rückgängig-Verlauf
       setLoaded({ ...fromContent(disk), title: l.title });
-      e.replaceDoc(disk.text);
+      // eigene kleine Schreibvorgänge (Logbuch-Status) als minimale Änderung: Cursor und Verlauf bleiben
+      if (opts?.minimal) e.applyExternal(disk.text);
+      else e.replaceDoc(disk.text);
       setExternal(null);
       recomputeDirty();
       bumpPreview();
@@ -441,7 +472,10 @@ export function UnterrichtView({
 
   function onVaultEvent(data: VaultChanged) {
     void refreshList();
-    if (data.fullRescan) void refreshFaecher();
+    if (data.fullRescan) {
+      void refreshFaecher();
+      void refreshLogbuchFaecher();
+    }
     const l = loadedRef.current;
     if (!l) return;
     const path = l.path;
@@ -456,6 +490,12 @@ export function UnterrichtView({
     if (inRemoved) {
       if (savingRef.current) recheckAfterSave.current = true;
       markRemoved(path, data.changed);
+      return;
+    }
+    if (own && !savingRef.current) {
+      // Eigener Schreibvorgang außerhalb des Editors (z. B. Logbuch-Status): Basis nachziehen,
+      // sonst wäre das nächste Speichern ein falscher Konflikt.
+      void checkDisk({ minimal: true });
       return;
     }
     if (externalRef.current === "removed" && !movedRef.current) void findMove(data.changed);
@@ -561,8 +601,8 @@ export function UnterrichtView({
   }
 
   // Aktuelle Funktionen für Effekte und den App-Griff (keine veralteten Closures)
-  const actions = useRef({ save, whenIdle, handleOpen, onVaultEvent, refreshList, refreshFaecher });
-  actions.current = { save, whenIdle, handleOpen, onVaultEvent, refreshList, refreshFaecher };
+  const actions = useRef({ save, whenIdle, handleOpen, onVaultEvent, refreshList, refreshFaecher, refreshLogbuchFaecher });
+  actions.current = { save, whenIdle, handleOpen, onVaultEvent, refreshList, refreshFaecher, refreshLogbuchFaecher };
 
   // ---------- Effekte ----------
   useEffect(() => {
@@ -633,6 +673,7 @@ export function UnterrichtView({
     setFachFilter(null);
     void actions.current.refreshList();
     void actions.current.refreshFaecher();
+    void actions.current.refreshLogbuchFaecher();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [vaultPath]);
 
@@ -641,6 +682,11 @@ export function UnterrichtView({
     if (!active) return;
     const id = requestAnimationFrame(() => ed.current?.requestMeasure());
     return () => cancelAnimationFrame(id);
+  }, [active]);
+
+  // Logbuch-Fächer: beim Einhängen und bei jedem Einblenden (Einstellungen können sich geändert haben)
+  useEffect(() => {
+    if (active) void actions.current.refreshLogbuchFaecher();
   }, [active]);
 
   const previewText = useMemo(
@@ -660,6 +706,7 @@ export function UnterrichtView({
   }
 
   const canSave = !readonly;
+  const logbuchAktiv = !!loaded?.fach && logbuchFaecher.has(loaded.fach.toLowerCase());
 
   return (
     <div className="view-wrap">
@@ -757,6 +804,11 @@ export function UnterrichtView({
                       {Icon.eye} Vorschau
                     </button>
                   </div>
+                  {logbuchAktiv && (
+                    <button className="btn small" onClick={logbuchErzeugen} title="Strg+L">
+                      {Icon.logbuch} Logbuch erzeugen
+                    </button>
+                  )}
                   <button
                     className="btn small primary"
                     onClick={() => void save()}

@@ -119,6 +119,57 @@ export type CreateResult =
   | { status: "created"; report: WriteReport }
   | { status: "exists"; relPath: string };
 
+// ---------- M2: Logbuch, Vertrag laut Design §2 ----------
+export type LogbuchStatus = "offen" | "kopiert" | "abgegeben";
+export type AbschnittQuelle = "erarbeitet" | "fragen" | "naechstes" | "leer";
+export type Umlaute = "erhalten" | "umschreiben";
+
+export interface LogbuchAbschnitt { titel: string; quelle: AbschnittQuelle; }
+export interface LogbuchFach {
+  kurz: string;                 // "GEC"
+  aktiv: boolean;
+  moodleUrl: string;            // "" = nicht gesetzt → https://www.lebk-moodle.de/
+  abschnitte: LogbuchAbschnitt[];
+  selbstbewertung: number | null; // Skala-Maximum (10) oder null = keine Bewertung
+  bewertungTitel: string;       // "Bewertung dieser Lerneinheit"
+  eintraegeProWoche: number;    // 2
+  umlaute: Umlaute;             // Standard "erhalten"
+  markdownEntfernen: boolean;   // Standard true
+  offenAb: string | null;       // "JJJJ-MM-TT": ältere Tage zählen nicht als offen
+}
+
+export interface LogbuchNotiz { path: string; title: string; thema: string | null; status: LogbuchStatus; block: number; privat: boolean; }
+export interface LogbuchTag { datum: string; status: LogbuchStatus; zaehlt: boolean; notizen: LogbuchNotiz[]; }
+export interface LogbuchFachTage {
+  kurz: string; ziel: string; moodleUrl: string /* wirksam */; eintraegeProWoche: number; offenAb: string | null;
+  tage: LogbuchTag[] /* neueste zuerst */; offen: number /* Tage mit status offen && zaehlt */; kopiert: number;
+}
+export interface LogbuchUebersicht { faecher: LogbuchFachTage[] /* nur aktive Fächer */; }
+
+export interface LogbuchAnfrage { fach: string; datum: string; mitKi: boolean; privatErlauben: boolean; }
+export interface Punkt { text: string; vorschlag: boolean; }
+export interface EntwurfAbschnitt { titel: string; quelle: AbschnittQuelle; punkte: Punkt[]; }
+export interface BewertungFeld { titel: string; skala: number; }
+export interface LogbuchQuelle { path: string; title: string; status: LogbuchStatus; privat: boolean; gesendet: boolean; ekEntfernt: boolean; }
+export interface KiAufruf { modell: string; eingabeTokens: number; ausgabeTokens: number; kostenUsd: number; versuche: number; }
+export interface LogbuchEntwurf {
+  fach: string; datum: string; kopfzeile: string /* "05.10.2026" */;
+  abschnitte: EntwurfAbschnitt[]; bewertung: BewertungFeld | null;
+  quellen: LogbuchQuelle[]; status: LogbuchStatus; moodleUrl: string;
+  mitKi: boolean; ki: KiAufruf | null; warnungen: string[];
+}
+// quellen[].gesendet: mit KI = was gesendet wurde; ohne KI = was gesendet WÜRDE (UI zeigt das vor dem KI-Klick).
+
+export interface TextAbschnitt { titel: string; punkte: string[]; }
+export interface LogbuchTextAnfrage { fach: string; datum: string; abschnitte: TextAbschnitt[]; bewertung: number | null; }
+export interface LogbuchKopieren extends LogbuchTextAnfrage { pfade: string[]; }
+export interface StatusFehler { path: string; meldung: string; }
+export interface LogbuchStatusReport { geschrieben: WriteReport[]; unveraendert: string[]; fehler: StatusFehler[]; sicherung: string | null; }
+export interface LogbuchKopiert { moodleUrl: string; moodleGeoeffnet: boolean; moodleFehler: string | null; status: LogbuchStatusReport; }
+
+export interface KiModell { id: string; name: string; eingabeUsdProMio: number; ausgabeUsdProMio: number; }
+export interface KiStatus { schluesselGespeichert: boolean; modell: string; modelle: KiModell[]; fehler: string | null; }
+
 export interface FolderInfo {
   path: string;
   name: string;
@@ -162,6 +213,18 @@ export const api = {
   previewUnterrichtNote: (req: NeueUnterrichtsnotiz) => invoke<NotizVorschau>("preview_unterricht_note", { req }),
   createUnterrichtNote: (req: NeueUnterrichtsnotiz) => invoke<CreateResult>("create_unterricht_note", { req }),
   saveNote: (path: string, text: string, base: NoteVersion) => invoke<SaveResult>("save_note", { path, text, base }),
+  // M2
+  logbuchEinstellungen: () => invoke<LogbuchFach[]>("logbuch_einstellungen"),        // alle bekannten Fächer (Stundenplan + 01 Fächer + Konfiguration)
+  logbuchEinstellungenSpeichern: (faecher: LogbuchFach[]) => invoke<LogbuchFach[]>("logbuch_einstellungen_speichern", { faecher }),
+  logbuchUebersicht: () => invoke<LogbuchUebersicht>("logbuch_uebersicht"),
+  logbuchEntwurf: (req: LogbuchAnfrage) => invoke<LogbuchEntwurf>("logbuch_entwurf", { req }),
+  logbuchText: (req: LogbuchTextAnfrage) => invoke<string>("logbuch_text", { req }),   // Vorschau; ohne Zahl steht "__/10"
+  logbuchKopieren: (req: LogbuchKopieren) => invoke<LogbuchKopiert>("logbuch_kopieren", { req }),
+  logbuchStatusSetzen: (pfade: string[], status: LogbuchStatus) => invoke<LogbuchStatusReport>("logbuch_status_setzen", { pfade, status }),
+  kiStatus: () => invoke<KiStatus>("ki_status"),
+  kiSchluesselSpeichern: (schluessel: string) => invoke<KiStatus>("ki_schluessel_speichern", { schluessel }),
+  kiSchluesselLoeschen: () => invoke<KiStatus>("ki_schluessel_loeschen"),
+  kiModellSetzen: (modell: string) => invoke<KiStatus>("ki_modell_setzen", { modell }),
 };
 
 export function onVaultChanged(cb: (c: VaultChanged) => void): Promise<UnlistenFn> {
@@ -185,6 +248,41 @@ export function formatDatum(iso: string | null): string {
   const [y, m, d] = iso.split("-");
   return `${d}.${m}.${y}`;
 }
+
+const WOCHENTAG_KURZ = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"];
+
+/** 2026-10-05 → „Mo 05.10.2026“ (in UTC gerechnet, keine Zeitzonen-Sprünge) */
+export function formatTagDatum(iso: string): string {
+  const d = new Date(iso + "T00:00:00Z");
+  const wt = Number.isNaN(d.getTime()) ? "" : WOCHENTAG_KURZ[d.getUTCDay()] + " ";
+  return wt + formatDatum(iso);
+}
+
+/** ISO-Kalenderwoche (Woche mit dem ersten Donnerstag ist KW 1) */
+export function isoWoche(iso: string): { jahr: number; kw: number } {
+  const d = new Date(iso + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7) + 3); // Donnerstag dieser Woche
+  const jahr = d.getUTCFullYear();
+  const jan4 = new Date(Date.UTC(jahr, 0, 4));
+  const kw = 1 + Math.round(((d.getTime() - jan4.getTime()) / 86_400_000 - 3 + ((jan4.getUTCDay() + 6) % 7)) / 7);
+  return { jahr, kw };
+}
+
+/** Ältester Unterrichtstag, der noch als offen zählt (Tage kommen neueste zuerst). */
+export function aeltesterOffen(f: LogbuchFachTage): LogbuchTag | null {
+  for (let i = f.tage.length - 1; i >= 0; i--) {
+    const t = f.tage[i];
+    if (t.status === "offen" && t.zaehlt) return t;
+  }
+  return null;
+}
+
+/** Statusfarbe: offen = amber, kopiert = lila, abgegeben = mint */
+export const LOGBUCH_STATUS_BADGE: Record<LogbuchStatus, string> = {
+  offen: "amber",
+  kopiert: "lilac",
+  abgegeben: "mint",
+};
 
 /** Stundenbereich: 2 → „2“, 6–7 → „6–7“ (Halbgeviertstrich) */
 export function stdText(von: number, bis: number): string {
