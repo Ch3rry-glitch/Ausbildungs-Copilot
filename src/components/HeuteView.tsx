@@ -1,5 +1,5 @@
-// Startansicht „Heute“: Tageswechsler, Stundenplan-Blöcke, Betriebstag/Wochenende, fällige Aufgaben,
-// offene Logbucheinträge.
+// Startansicht „Heute“: Tageswechsler, Stundenplan-Blöcke, Betriebstag/Wochenende, fällige Aufgaben
+// (mit Abhaken), offene Logbucheinträge.
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   aeltesterOffen,
@@ -7,6 +7,7 @@ import {
   errorText,
   formatDatum,
   formatTagDatum,
+  samePath,
   stdText,
   type FaelligeAufgabe,
   type HeuteBlock,
@@ -16,7 +17,9 @@ import {
   type NoteSummary,
   type VaultChanged,
 } from "../api";
+import { abhaken, aufgabenText } from "../aufgaben";
 import { Icon } from "../icons";
+import { useToast } from "../toast";
 
 /** ISO-Datum ± Tage, in UTC gerechnet (keine Zeitzonen-Sprünge). */
 function shiftIso(iso: string, days: number): string {
@@ -30,16 +33,24 @@ export function HeuteView({
   onOpenNote,
   onCreate,
   onOpenLogbuch,
+  onOpenAufgaben,
+  dirtyPath,
 }: {
   change: { seq: number; data: VaultChanged } | null;
   onOpenNote: (path: string, line?: number) => void;
   onCreate: (initial: Partial<NeueUnterrichtsnotiz>) => void;
   onOpenLogbuch: (fach: string) => void;
+  onOpenAufgaben: () => void;
+  /** Pfad der Notiz im Editor, wenn sie ungespeicherte Änderungen hat (Abhaken dort gesperrt) */
+  dirtyPath: string | null;
 }) {
+  const { notify } = useToast();
   // null = heute (das Datum liefert das Backend, nie new Date() in UTC)
   const [date, setDate] = useState<string | null>(null);
   const [tag, setTag] = useState<HeuteTag | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Aufgaben, deren Abhaken gerade läuft (Schlüssel path + Zeile)
+  const [laeuft, setLaeuft] = useState<ReadonlySet<string>>(new Set());
   const seq = useRef(0);
 
   const load = useCallback(async () => {
@@ -101,6 +112,29 @@ export function HeuteView({
 
   const step = (days: number) => {
     if (tag) setDate(shiftIso(tag.datum, days));
+  };
+
+  // Abhaken (gleicher Befehl wie in „Aufgaben“), danach Heute neu laden – auch nach einem Fehler
+  async function erledigen(t: FaelligeAufgabe) {
+    const k = `${t.path}\n${t.line}`;
+    if (laeuft.has(k)) return;
+    setLaeuft((s) => new Set(s).add(k));
+    try {
+      await abhaken(notify, t, true);
+    } finally {
+      await load();
+      setLaeuft((s) => {
+        const n = new Set(s);
+        n.delete(k);
+        return n;
+      });
+    }
+  }
+  const taskProps = {
+    laeuft,
+    dirtyPath,
+    onOpenNote,
+    onErledigt: (t: FaelligeAufgabe) => void erledigen(t),
   };
 
   const a = tag?.aufgaben;
@@ -237,17 +271,20 @@ export function HeuteView({
             <div className="panel-head">
               <span className="panel-title">Fällige Aufgaben</span>
               {a && a.ueberfaellig.length > 0 && <span className="badge red">{a.ueberfaellig.length} überfällig</span>}
+              <span className="filter-spacer" />
+              <button className="btn small" onClick={onOpenAufgaben} title="Alle Arbeitsaufträge und Lernaufgaben">
+                {Icon.aufgaben} Alle
+              </button>
             </div>
             <div className="panel-body">
               {tag && aufgabenLeer && <div className="hint pad">Keine fälligen Aufgaben.</div>}
               {a && (
                 <>
-                  <TaskGroup title="Überfällig" items={a.ueberfaellig} red onOpenNote={onOpenNote} />
-                  <TaskGroup title="Heute" items={a.heute} onOpenNote={onOpenNote} />
-                  <TaskGroup title="Nächste 7 Tage" items={a.naechsteTage} onOpenNote={onOpenNote} />
+                  <TaskGroup title="Überfällig" items={a.ueberfaellig} red {...taskProps} />
+                  <TaskGroup title="Heute" items={a.heute} {...taskProps} />
+                  <TaskGroup title="Nächste 7 Tage" items={a.naechsteTage} {...taskProps} />
                 </>
               )}
-              <div className="hint pad">Abhaken kommt mit M3.</div>
             </div>
           </section>
         </div>
@@ -334,12 +371,18 @@ function TaskGroup({
   title,
   items,
   red,
+  laeuft,
+  dirtyPath,
   onOpenNote,
+  onErledigt,
 }: {
   title: string;
   items: FaelligeAufgabe[];
   red?: boolean;
+  laeuft: ReadonlySet<string>;
+  dirtyPath: string | null;
   onOpenNote: (path: string, line?: number) => void;
+  onErledigt: (t: FaelligeAufgabe) => void;
 }) {
   if (items.length === 0) return null;
   return (
@@ -347,16 +390,34 @@ function TaskGroup({
       <div className="task-group-head">
         {title} <span className={`badge ${red ? "red" : "muted"}`}>{items.length}</span>
       </div>
-      {items.map((t) => (
-        <button key={`${t.path}:${t.line}`} className="note-item task-item" onClick={() => onOpenNote(t.path, t.line)}>
-          <div className="task-text">{t.text || "(ohne Text)"}</div>
-          <div className="note-meta">
-            <span className={red ? "due red" : "due"}>{formatDatum(t.due)}</span>
-            {t.fach && <span className="badge muted">{t.fach}</span>}
-            <span className="task-note">{t.title}</span>
+      {items.map((t) => {
+        const busy = laeuft.has(`${t.path}\n${t.line}`);
+        const dirty = samePath(t.path, dirtyPath);
+        const text = aufgabenText(t.text);
+        return (
+          <div key={`${t.path}:${t.line}`} className={`heute-task ${busy ? "busy" : ""}`} aria-busy={busy}>
+            <input
+              type="checkbox"
+              className="auftrag-check"
+              checked={busy}
+              disabled={busy || dirty}
+              onChange={() => onErledigt(t)}
+              aria-label={`Abhaken: ${text}`}
+              title={dirty ? `„${t.title}“ hat ungespeicherte Änderungen – erst speichern` : "Abhaken"}
+            />
+            <button className="note-item task-item" onClick={() => onOpenNote(t.path, t.line)}>
+              <div className="task-text">{text}</div>
+              <div className="note-meta">
+                <span className={red ? "due red" : "due"}>{formatDatum(t.due)}</span>
+                {t.fach && <span className="badge muted">{t.fach}</span>}
+                <span className="task-note">{t.title}</span>
+                {busy && <span className="spinner" aria-label="wird geschrieben" />}
+              </div>
+              {dirty && <div className="hint lb-warn-text">Ungespeicherte Änderungen – erst speichern.</div>}
+            </button>
           </div>
-        </button>
-      ))}
+        );
+      })}
     </div>
   );
 }

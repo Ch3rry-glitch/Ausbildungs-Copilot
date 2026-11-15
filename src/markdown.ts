@@ -115,3 +115,22 @@ const PURIFY = {
 export function renderMarkdown(body: string): string {
   return DOMPurify.sanitize(md.render(body), PURIFY) as string;
 }
+
+/** Eine Zeile Markdown leicht entfernen (Listen, Toasts): Links als Text, Hervorhebungen und
+ *  Zeichen des Tasks-Plugins weg, Leerraum zusammengefasst. Ergebnis ist reiner Text (React escapt). */
+export function klartext(s: string): string {
+  return s
+    .replace(/!?\[\[([^\]|]*?)(?:\\?\|([^\]]*))?\]\]/g, (_m, ziel: string, alias?: string) =>
+      alias?.trim() ? alias.trim() : ziel.replace(/#\^?/g, " › ").trim(),
+    )
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/`([^`]*)`/g, "$1")
+    .replace(/(\*\*|__)(.+?)\1/g, "$2")
+    .replace(/(~~|==)(.+?)\1/g, "$2")
+    .replace(/(^|[^\w*])\*(?!\s)([^*]+?)\*(?![\w*])/g, "$1$2")
+    .replace(/(^|[^\p{L}\p{N}_])_(?!\s)([^_]+?)_(?![\p{L}\p{N}_])/gu, "$1$2")
+    .replace(/\s*[✅❌⏳🛫➕]️?\s*\d{4}-\d{2}-\d{2}/gu, "")
+    .replace(/[⏫🔼🔽⏬🔺]️?/gu, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}

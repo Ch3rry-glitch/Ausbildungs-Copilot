@@ -8,6 +8,8 @@ import { SettingsView } from "./components/SettingsView";
 import { HeuteView } from "./components/HeuteView";
 import { UnterrichtView, type EditorHandle } from "./components/UnterrichtView";
 import { LogbuchView, type LogbuchRequest } from "./components/LogbuchView";
+import { AufgabenView } from "./components/AufgabenView";
+import { FragenView } from "./components/FragenView";
 import { CreateNoteDialog } from "./components/CreateNoteDialog";
 import { askUnsaved, isModalOpen } from "./components/Modal";
 import { ToastProvider, useToast } from "./toast";
@@ -31,6 +33,11 @@ function Cockpit() {
   const [logbuchMounted, setLogbuchMounted] = useState(false);
   const [logbuchRequest, setLogbuchRequest] = useState<LogbuchRequest | null>(null);
   const [logbuchOffen, setLogbuchOffen] = useState<number | null>(null);
+  // Aufgaben und Fragen bleiben nach dem ersten Besuch eingehängt: Reiter und Filter überleben
+  // einen Abstecher in die Quellnotiz.
+  const [aufgabenMounted, setAufgabenMounted] = useState(false);
+  const [fragenMounted, setFragenMounted] = useState(false);
+  const [aufgabenUeberfaellig, setAufgabenUeberfaellig] = useState<number | null>(null);
   const [change, setChange] = useState<{ seq: number; data: VaultChanged } | null>(null);
   const [openRequest, setOpenRequest] = useState<{ path: string; line?: number; seq: number } | null>(null);
   const [createInitial, setCreateInitial] = useState<Partial<NeueUnterrichtsnotiz> | null>(null);
@@ -82,6 +89,8 @@ function Cockpit() {
       if (v !== viewRef.current && !(await einstellungenVerlassenOk())) return;
       if (v === "unterricht") setUnterrichtMounted(true);
       if (v === "logbuch") setLogbuchMounted(true);
+      if (v === "aufgaben") setAufgabenMounted(true);
+      if (v === "fragen") setFragenMounted(true);
       setView(v);
     },
     [einstellungenVerlassenOk],
@@ -111,6 +120,19 @@ function Cockpit() {
     }
   }, []);
 
+  // Zahl überfälliger Arbeitsaufträge für die Seitenleiste (Fehler → keine Anzeige)
+  const ueberfaelligSeq = useRef(0);
+  const refreshAufgabenUeberfaellig = useCallback(async () => {
+    ueberfaelligSeq.current += 1;
+    const mine = ueberfaelligSeq.current;
+    try {
+      const u = await api.aufgabenUebersicht(null);
+      if (mine === ueberfaelligSeq.current) setAufgabenUeberfaellig(u.ueberfaellig.length);
+    } catch {
+      if (mine === ueberfaelligSeq.current) setAufgabenUeberfaellig(null);
+    }
+  }, []);
+
   const openNote = useCallback(
     async (path: string, line?: number) => {
       if (!(await einstellungenVerlassenOk())) return;
@@ -133,6 +155,7 @@ function Cockpit() {
       setChange({ seq: changeSeq.current, data });
       void refreshStatus();
       void refreshLogbuchOffen();
+      void refreshAufgabenUeberfaellig();
       const n = data.changed.length + data.removed.length;
       if (data.fullRescan) notify({ kind: "live", text: "Vault neu eingelesen" });
       else if (n > 0) notify({ kind: "live", text: `${n} ${n === 1 ? "Änderung" : "Änderungen"} aus Obsidian übernommen` });
@@ -140,12 +163,14 @@ function Cockpit() {
     return () => {
       void un.then((f) => f());
     };
-  }, [refreshStatus, refreshLogbuchOffen, notify]);
+  }, [refreshStatus, refreshLogbuchOffen, refreshAufgabenUeberfaellig, notify]);
 
   // Bereichswechsel (z. B. nach den Einstellungen) → Zähler frisch
   useEffect(() => {
-    if (status?.vaultOk) void refreshLogbuchOffen();
-  }, [view, status?.vaultOk, status?.vaultPath, refreshLogbuchOffen]);
+    if (!status?.vaultOk) return;
+    void refreshLogbuchOffen();
+    void refreshAufgabenUeberfaellig();
+  }, [view, status?.vaultOk, status?.vaultPath, refreshLogbuchOffen, refreshAufgabenUeberfaellig]);
 
   // Strg+N: aktuelle Stunde → Notiz öffnen oder anlegen
   const strgNBusy = useRef(false);
@@ -267,10 +292,24 @@ function Cockpit() {
 
   return (
     <div className="shell">
-      <Sidebar view={view} onView={go} status={status} editorDirty={editorDirty} logbuchOffen={logbuchOffen} />
+      <Sidebar
+        view={view}
+        onView={go}
+        status={status}
+        editorDirty={editorDirty}
+        logbuchOffen={logbuchOffen}
+        aufgabenUeberfaellig={aufgabenUeberfaellig}
+      />
       <main className="main">
         {view === "heute" && (
-          <HeuteView change={change} onOpenNote={openNote} onCreate={openCreate} onOpenLogbuch={(fach) => void openLogbuch({ fach })} />
+          <HeuteView
+            change={change}
+            onOpenNote={openNote}
+            onCreate={openCreate}
+            onOpenLogbuch={(fach) => void openLogbuch({ fach })}
+            onOpenAufgaben={() => void go("aufgaben")}
+            dirtyPath={dirtyPath}
+          />
         )}
         {unterrichtMounted && (
           <div className="view-host" hidden={view !== "unterricht"}>
@@ -299,6 +338,22 @@ function Cockpit() {
               onUngesichert={(b) => {
                 logbuchUngesichert.current = b;
               }}
+            />
+          </div>
+        )}
+        {aufgabenMounted && (
+          <div className="view-host" hidden={view !== "aufgaben"}>
+            <AufgabenView active={view === "aufgaben"} change={change} onOpenNote={openNote} dirtyPath={dirtyPath} />
+          </div>
+        )}
+        {fragenMounted && (
+          <div className="view-host" hidden={view !== "fragen"}>
+            <FragenView
+              active={view === "fragen"}
+              change={change}
+              onOpenNote={openNote}
+              dirtyPath={dirtyPath}
+              onGoSettings={() => void go("einstellungen")}
             />
           </div>
         )}
