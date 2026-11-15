@@ -170,6 +170,40 @@ export interface LogbuchKopiert { moodleUrl: string; moodleGeoeffnet: boolean; m
 export interface KiModell { id: string; name: string; eingabeUsdProMio: number; ausgabeUsdProMio: number; }
 export interface KiStatus { schluesselGespeichert: boolean; modell: string; modelle: KiModell[]; fehler: string | null; }
 
+// ---------- M3: Aufgaben, Fragen, Lücken (Vertrag laut Design M3) ----------
+/** Eine Aufgabe `- [ ]` aus einer Notiz (Arbeitsauftrag der Lehrkraft). `line` ist 1-basiert. */
+export interface Arbeitsauftrag {
+  path: string; title: string; kind: NoteKind; fach: string | null; lernfeld: string | null;
+  datum: string | null; line: number; text: string; done: boolean; statusChar: string; due: string | null;
+  indent: number; privat: boolean;
+}
+/** Eigene Notiz in „07 Material/Aufgabensammlung“ */
+export interface Lernaufgabe {
+  path: string; title: string; fach: string | null; lernfeld: string | null; typ: string | null;
+  schwierigkeit: string | null; geloest: boolean; quelle: string | null /* Linkziel/Alias als Text */; nochmal: boolean;
+}
+export interface AufgabenUebersicht {
+  heute: string;
+  ueberfaellig: Arbeitsauftrag[]; dieseWoche: Arbeitsauftrag[]; spaeter: Arbeitsauftrag[];
+  ohneFrist: Arbeitsauftrag[]; zuletztErledigt: Arbeitsauftrag[]; lernaufgaben: Lernaufgabe[];
+}
+export interface AufgabeAbhaken { path: string; line: number; text: string /* Task.text wie geliefert */; erledigt: boolean /* Zielzustand */; }
+export interface AufgabeErgebnis { report: WriteReport | null /* null = war schon so */; line: number /* tatsächliche Zeile */; verschoben: boolean; }
+
+export interface FrageEintrag {
+  path: string; title: string; kind: NoteKind; fach: string | null; datum: string | null;
+  line: number | null /* null = nur Frontmatter-Tag */; text: string; zeile: string /* Originalzeile getrimmt */; privat: boolean;
+}
+export interface NochmalGruppe { fach: string | null; eintraege: FrageEintrag[]; }
+export type GeklaertModus = "durchstreichen" | "abschnitt";
+export interface FragenUebersicht { fragen: FrageEintrag[]; nochmal: NochmalGruppe[]; modus: GeklaertModus; }
+export interface FrageKlaeren { path: string; line: number; zeile: string; vorschau: boolean; }
+export interface FrageGeklaert {
+  vorher: string; nachher: string; abschnittNeu: boolean /* „## Geklärt“ wird angelegt */;
+  verschoben: boolean /* Modus Abschnitt */; line: number; report: WriteReport | null /* null bei Vorschau */;
+}
+export interface FragenEinstellungen { geklaertModus: GeklaertModus; }
+
 export interface FolderInfo {
   path: string;
   name: string;
@@ -225,6 +259,15 @@ export const api = {
   kiSchluesselSpeichern: (schluessel: string) => invoke<KiStatus>("ki_schluessel_speichern", { schluessel }),
   kiSchluesselLoeschen: () => invoke<KiStatus>("ki_schluessel_loeschen"),
   kiModellSetzen: (modell: string) => invoke<KiStatus>("ki_modell_setzen", { modell }),
+  // M3
+  aufgabenUebersicht: (datum: string | null) => invoke<AufgabenUebersicht>("aufgaben_uebersicht", { datum }),
+  aufgabeAbhaken: (req: AufgabeAbhaken) => invoke<AufgabeErgebnis>("aufgabe_abhaken", { req }),
+  lernaufgabeGeloest: (path: string, geloest: boolean) => invoke<WriteReport | null>("lernaufgabe_geloest", { path, geloest }),
+  fragenUebersicht: () => invoke<FragenUebersicht>("fragen_uebersicht"),
+  frageKlaeren: (req: FrageKlaeren) => invoke<FrageGeklaert>("frage_klaeren", { req }),
+  fragenEinstellungen: () => invoke<FragenEinstellungen>("fragen_einstellungen"),
+  fragenEinstellungenSpeichern: (einstellungen: FragenEinstellungen) =>
+    invoke<FragenEinstellungen>("fragen_einstellungen_speichern", { einstellungen }),
 };
 
 export function onVaultChanged(cb: (c: VaultChanged) => void): Promise<UnlistenFn> {
@@ -247,6 +290,11 @@ export function formatDatum(iso: string | null): string {
   if (!iso) return "";
   const [y, m, d] = iso.split("-");
   return `${d}.${m}.${y}`;
+}
+
+/** Tage von `von` bis `bis` (ISO-Daten, in UTC gerechnet; negativ = `bis` liegt davor) */
+export function tageBis(von: string, bis: string): number {
+  return Math.round((Date.parse(bis + "T00:00:00Z") - Date.parse(von + "T00:00:00Z")) / 86_400_000);
 }
 
 const WOCHENTAG_KURZ = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"];

@@ -1,18 +1,18 @@
 import type { AppStatus } from "../api";
 import { Icon } from "../icons";
 
-export type View = "heute" | "unterricht" | "logbuch" | "notizen" | "einstellungen";
+export type View = "heute" | "unterricht" | "logbuch" | "aufgaben" | "fragen" | "notizen" | "einstellungen";
 
 // Reihenfolge laut SPEC §8. Noch nicht gebaute Bereiche zeigen ihren Meilenstein.
 const ACTIVE: { key: View; label: string }[] = [
   { key: "heute", label: "Heute" },
   { key: "unterricht", label: "Unterricht" },
   { key: "logbuch", label: "Logbuch" },
+  { key: "aufgaben", label: "Aufgaben" },
+  { key: "fragen", label: "Fragen" },
 ];
 
 const SOON: { key: string; label: string; milestone: string }[] = [
-  { key: "aufgaben", label: "Aufgaben", milestone: "M3" },
-  { key: "fragen", label: "Fragen", milestone: "M3" },
   { key: "berichtsheft", label: "Berichtsheft", milestone: "M4" },
   { key: "inbox", label: "Inbox", milestone: "M5" },
   { key: "pruefungen", label: "Prüfungen", milestone: "M6" },
@@ -24,6 +24,7 @@ export function Sidebar({
   status,
   editorDirty,
   logbuchOffen,
+  aufgabenUeberfaellig,
 }: {
   view: View;
   onView: (v: View) => void;
@@ -31,6 +32,8 @@ export function Sidebar({
   editorDirty: boolean;
   /** Zahl offener Logbucheinträge; null = keine Anzeige */
   logbuchOffen: number | null;
+  /** Zahl überfälliger Arbeitsaufträge; null = keine Anzeige */
+  aufgabenUeberfaellig: number | null;
 }) {
   return (
     <aside className="sidebar glass">
@@ -50,6 +53,14 @@ export function Sidebar({
           {it.key === "logbuch" && logbuchOffen != null && logbuchOffen > 0 && (
             <span className="nav-count" title={logbuchOffen === 1 ? "1 offener Logbucheintrag" : `${logbuchOffen} offene Logbucheinträge`}>
               {logbuchOffen}
+            </span>
+          )}
+          {it.key === "aufgaben" && aufgabenUeberfaellig != null && aufgabenUeberfaellig > 0 && (
+            <span
+              className="nav-count red"
+              title={aufgabenUeberfaellig === 1 ? "1 überfällige Aufgabe" : `${aufgabenUeberfaellig} überfällige Aufgaben`}
+            >
+              {aufgabenUeberfaellig}
             </span>
           )}
         </button>

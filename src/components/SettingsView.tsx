@@ -1,6 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { api, errorText, type AbschnittQuelle, type AppStatus, type KiModell, type KiStatus, type LogbuchFach } from "../api";
+import {
+  api,
+  errorText,
+  type AbschnittQuelle,
+  type AppStatus,
+  type GeklaertModus,
+  type KiModell,
+  type KiStatus,
+  type LogbuchFach,
+} from "../api";
 import { Icon } from "../icons";
 
 export function SettingsView({
@@ -84,9 +93,92 @@ export function SettingsView({
 
         {/* neu laden, wenn der Vault wechselt (Fächer kommen aus Stundenplan und „01 Fächer“) */}
         <LogbuchEinstellungen key={status.vaultPath ?? ""} onDirty={onLogbuchDirty} />
+        <FragenEinstellungenKarte />
         <KiEinstellungen />
       </div>
     </>
+  );
+}
+
+// ---------- Fragen ----------
+
+const GEKLAERT_MODI: { value: GeklaertModus; label: string; hint: string }[] = [
+  {
+    value: "durchstreichen",
+    label: "Tag durchstreichen (~~#frage~~)",
+    hint: "Die Zeile bleibt, wo sie ist – nur das Tag wird durchgestrichen.",
+  },
+  {
+    value: "abschnitt",
+    label: "In Abschnitt „Geklärt“ verschieben",
+    hint: "Tag durchstreichen und die Zeile ans Ende des Abschnitts „## Geklärt“ der Notiz verschieben (wird bei Bedarf angelegt).",
+  },
+];
+
+function FragenEinstellungenKarte() {
+  const [modus, setModus] = useState<GeklaertModus | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    api
+      .fragenEinstellungen()
+      .then((e) => alive && setModus(e.geklaertModus))
+      .catch((e) => alive && setMsg({ ok: false, text: errorText(e) }));
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  async function waehle(m: GeklaertModus) {
+    if (busy || m === modus) return;
+    setBusy(true);
+    setMsg(null);
+    try {
+      const e = await api.fragenEinstellungenSpeichern({ geklaertModus: m });
+      setModus(e.geklaertModus);
+      setMsg({ ok: true, text: "Gespeichert." });
+    } catch (e) {
+      setMsg({ ok: false, text: errorText(e) });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="settings glass">
+      <div>
+        <div className="settings-title-row">
+          <h2>Fragen</h2>
+        </div>
+        <div className="hint">Was „Geklärt“ in der Ansicht „Fragen“ mit der Zeile in deiner Notiz macht.</div>
+      </div>
+      {modus && (
+        <div className="field">
+          <span>Geklärte Fragen</span>
+          <div className="radio-group" role="radiogroup" aria-label="Geklärte Fragen">
+            {GEKLAERT_MODI.map((o) => (
+              <label key={o.value} className="check radio-option">
+                <input
+                  type="radio"
+                  name="geklaert-modus"
+                  value={o.value}
+                  checked={modus === o.value}
+                  onChange={() => void waehle(o.value)}
+                  disabled={busy}
+                />
+                <span>
+                  <span className="radio-label">{o.label}</span>
+                  <span className="hint radio-hint">{o.hint}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+      {msg && <div className={msg.ok ? "result" : "error"}>{msg.text}</div>}
+    </section>
   );
 }
 

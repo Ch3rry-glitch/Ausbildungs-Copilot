@@ -51,7 +51,7 @@ pub(crate) fn prose_lines(text: &str) -> Vec<ProseLine<'_>> {
     out
 }
 
-fn mask_inline_code(line: &str) -> String {
+pub(crate) fn mask_inline_code(line: &str) -> String {
     if !line.contains('`') {
         return line.to_string();
     }

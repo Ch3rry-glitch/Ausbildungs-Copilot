@@ -511,3 +511,90 @@ input[type="date"].input::-webkit-calendar-picker-indicator { filter: invert(0.8
 .num-input.invalid { border-color: var(--amber); }
 .ki-key-row { align-items: center; }
 .ki-key-input { flex: 1; min-width: 220px; max-width: 420px; }
+
+/* ======================================================================
+   M3: Aufgaben, Fragen, Abhaken in „Heute“, Einstellungen „Fragen“
+   ====================================================================== */
+
+/* Seitenleiste: überfällige Aufgaben (rot, auffälliger als die Logbuch-Zahl) */
+.nav-count.red { background: var(--red-bg); color: var(--red); box-shadow: 0 0 12px rgba(251, 113, 133, 0.35); }
+.pill-count.muted { background: rgba(255, 255, 255, 0.08); color: var(--text-2); }
+.pill-count.red { background: var(--red-bg); color: var(--red); }
+
+/* Reiter + Filter in einer Zeile */
+.filter-bar { display: flex; align-items: center; gap: 10px 14px; flex-wrap: wrap; }
+.filter-spacer { flex: 1; }
+.filter { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-3); font-weight: 600; }
+.filter .input { padding: 6px 10px; font-size: 12.5px; max-width: 220px; }
+
+/* Abschnitte untereinander, die ganze Spalte scrollt */
+.aufgaben-scroll { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 18px; padding-right: 2px; }
+.aufgaben-scroll > .panel, .aufgaben-scroll > .nochmal-grid { flex: none; }
+
+/* Eine Aufgabe / Frage */
+.auftrag { display: flex; align-items: flex-start; gap: 12px; padding: 10px 12px; border-radius: 14px; border: 1px solid transparent; margin-bottom: 2px; transition: opacity 0.15s; }
+.auftrag:hover { background: var(--glass); }
+.auftrag.busy { opacity: 0.6; }
+.auftrag-main { flex: 1; min-width: 0; }
+.auftrag-text { font-size: 13.5px; color: var(--text); line-height: 1.45; overflow-wrap: anywhere; user-select: text; }
+.auftrag.done .auftrag-text { color: var(--text-3); text-decoration: line-through; text-decoration-color: rgba(236, 228, 255, 0.35); }
+.auftrag .note-meta .lb-link { font-size: 12px; padding: 0; max-width: 100%; text-align: left; overflow-wrap: anywhere; }
+.auftrag .note-meta .lb-link svg { width: 13px; height: 13px; flex: none; }
+.auftrag .note-meta .lb-busy { font-size: 12px; }
+.auftrag .hint { margin-top: 4px; }
+.auftrag-aktionen { display: flex; gap: 6px; align-items: center; flex: none; }
+.auftrag-check { width: 17px; height: 17px; margin: 2px 0 0; flex: none; accent-color: var(--purple); cursor: pointer; }
+.auftrag-check:disabled { cursor: default; opacity: 0.55; }
+.frage-icon { flex: none; color: var(--purple-2); margin-top: 1px; }
+.frage-icon svg { width: 17px; height: 17px; }
+.fragen-modus { padding: 0 18px 6px; }
+
+/* „Ohne Frist“: nach Notiz gruppiert */
+.auftrag-gruppe { margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid var(--glass-border); }
+.auftrag-gruppe:last-child { border-bottom: none; margin-bottom: 0; }
+.auftrag-gruppe-head { display: flex; align-items: center; gap: 8px; padding: 6px 8px 4px 12px; flex-wrap: wrap; }
+.auftrag-gruppe-head .lb-link { font-weight: 600; }
+
+/* Lernaufgaben-Tabelle */
+.lern-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; }
+.lern-table th { text-align: left; padding: 8px 10px; font-size: 11.5px; font-weight: 700; letter-spacing: 0.02em; text-transform: uppercase; color: var(--text-3); border-bottom: 1px solid var(--glass-border); white-space: nowrap; }
+.lern-table td { padding: 9px 10px; border-bottom: 1px solid rgba(255, 255, 255, 0.06); vertical-align: top; color: var(--text-2); }
+.lern-table tbody tr:hover td { background: var(--glass); }
+.lern-table tbody tr:last-child td { border-bottom: none; }
+.lern-table tr.busy td { opacity: 0.6; }
+.lern-table tr.geloest .lern-titel .lb-link { color: var(--text-3); text-decoration: line-through; }
+.lern-table .center { text-align: center; }
+.lern-table td.center .auftrag-check { margin: 1px auto 0; }
+.lern-titel { min-width: 220px; }
+.lern-titel-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.lern-titel .lb-link { padding: 0; text-align: left; }
+.lern-leer { color: var(--text-3); }
+.lern-aktionen { width: 1%; white-space: nowrap; }
+
+/* „Nochmal ansehen“: Karten je Fach */
+.nochmal-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 18px; align-items: start; }
+
+/* Bestätigung „Geklärt“: vorher/nachher */
+.modal-geklaert { width: min(640px, 92vw) !important; }
+.modal-geklaert .modal-head .hint { margin-top: 2px; }
+.geklaert-body { display: flex; flex-direction: column; gap: 6px; }
+.diff-label { font-size: 11.5px; font-weight: 700; letter-spacing: 0.02em; text-transform: uppercase; color: var(--text-3); margin-top: 4px; }
+.diff-zeile { margin: 0; font-family: var(--mono); font-size: 12.5px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text); padding: 10px 14px; border-radius: var(--radius-sm); border: 1px solid var(--glass-border); border-left-width: 3px; user-select: text; }
+.diff-zeile.vorher { background: rgba(251, 113, 133, 0.08); border-left-color: var(--red); }
+.diff-zeile.nachher { background: rgba(94, 234, 212, 0.07); border-left-color: var(--mint); }
+.geklaert-hinweis { margin-top: 8px; color: var(--text-2); }
+
+/* Heute: fällige Aufgabe mit Kästchen */
+.heute-task { display: flex; align-items: flex-start; gap: 2px; }
+.heute-task > .auftrag-check { margin: 11px 0 0 10px; }
+.heute-task > .note-item { flex: 1; min-width: 0; }
+.heute-task.busy > .note-item { opacity: 0.6; }
+.heute-task .note-meta .spinner { width: 12px; height: 12px; }
+
+/* Einstellungen: Auswahl mit Erklärung */
+.radio-group { display: flex; flex-direction: column; gap: 10px; }
+.radio-option { align-items: flex-start; }
+.radio-option input[type="radio"] { width: 16px; height: 16px; margin: 2px 0 0; accent-color: var(--purple); cursor: pointer; flex: none; }
+.radio-option input:disabled { cursor: default; }
+.radio-label { display: block; color: var(--text); font-weight: 600; }
+.radio-hint { display: block; margin-top: 2px; }
