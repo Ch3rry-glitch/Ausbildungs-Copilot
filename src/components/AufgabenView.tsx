@@ -537,7 +537,8 @@ function AuftragZeile({
 }) {
   const busy = ziel !== undefined;
   const text = aufgabenText(a.text);
-  const f = a.due && heute ? faelligkeit(a.due, heute) : null;
+  // erledigt: Frist nur als Datum, nie rot „überfällig“
+  const f = a.due && heute ? (a.done ? { ...faelligkeit(a.due, heute), cls: "muted", title: "Frist" } : faelligkeit(a.due, heute)) : null;
   const zeichen = !a.done && a.statusChar !== " " ? a.statusChar : null;
   // Einrückung nur in der Notiz-Reihenfolge („Ohne Frist“) sinnvoll
   const einzug = !mitQuelle && a.indent > 0 ? { paddingLeft: 12 + Math.min(a.indent, 12) * 4 } : undefined;

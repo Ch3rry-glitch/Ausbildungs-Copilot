@@ -130,7 +130,13 @@ impl From<&NoteMeta> for NoteSummary {
             datum: m.datum,
             fach: m.fach.clone(),
             modified_ms: m.modified_ms,
-            open_tasks: m.tasks.iter().filter(|t| !t.done).count(),
+            // wie „00 Start/Aufgaben.md“: offen und (mit Frist oder Text länger als 3 Zeichen) –
+            // der Vorlagen-Platzhalter `- [ ]  📅 ` zählt nicht
+            open_tasks: m
+                .tasks
+                .iter()
+                .filter(|t| crate::aufgaben::ist_offen(t) && (t.due.is_some() || crate::aufgaben::lang_genug(&t.text)))
+                .count(),
             tags: m.tags.clone(),
             thema: m
                 .fields
