@@ -17,15 +17,17 @@ use crate::config::{self, AppConfig};
 use crate::error::{AppError, AppResult};
 use crate::index::{self, VaultIndex};
 use crate::model::{
-    AppStatus, AufgabeAbhaken, AufgabeErgebnis, AufgabenUebersicht, CreateResult, FachInfo, FolderInfo, FrageGeklaert,
-    FrageKlaeren, FragenEinstellungen, FragenUebersicht, HeuteTag, KiStatus, LernfeldInfo, LogbuchAnfrage,
-    LogbuchEntwurf, LogbuchFach, LogbuchKopieren, LogbuchKopiert, LogbuchStatus, LogbuchStatusReport,
-    LogbuchTextAnfrage, LogbuchUebersicht, NeueUnterrichtsnotiz, NoteContent, NoteMeta, NoteSummary, NoteVersion,
-    NotizVorschau, RelPath, SaveResult, StarterReport, VaultChanged, WriteReport,
+    Aenderung, AppStatus, AufgabeAbhaken, AufgabeErgebnis, AufgabenUebersicht, BerichtsWoche, BerichtsheftUebersicht,
+    BetriebFortschreiben, BetriebVorschlag, CreateResult, FachInfo, FolderInfo, FrageGeklaert, FrageKlaeren,
+    FragenEinstellungen, FragenUebersicht, HeuteTag, KiStatus, LernfeldAnfrage, LernfeldEntwurf, LernfeldInfo,
+    LernfelderSchreiben, LogbuchAnfrage, LogbuchEntwurf, LogbuchFach, LogbuchKopieren, LogbuchKopiert, LogbuchStatus,
+    LogbuchStatusReport, LogbuchTextAnfrage, LogbuchUebersicht, NachweisAnfrage, NachweisEntwurf, NachweisSchreiben,
+    NeueUnterrichtsnotiz, NeueWoche, NoteContent, NoteMeta, NoteSummary, NoteVersion, NotizVorschau, RelPath,
+    SaveResult, SchultageUebernehmen, StarterReport, TagSpeichern, VaultChanged, WochenVorschau, WriteReport,
 };
 use crate::watcher::{self, SharedIndex, VaultWatcher};
 use crate::write::{self, RetryPolicy, SaveOutcome, SelfWrites};
-use crate::{aufgaben, fragen, guard, heute as heute_mod, ki, logbuch, obsidian, starter, unterricht};
+use crate::{aufgaben, berichtsheft, fragen, guard, heute as heute_mod, ki, logbuch, obsidian, starter, unterricht};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
 pub const EVENT_VAULT_CHANGED: &str = "vault-changed";
@@ -749,6 +751,226 @@ pub async fn fragen_einstellungen_speichern(
     Ok(cfg.fragen.clone())
 }
 
+// ---------------------------------------------------------------------------------------------
+// M4: Berichtsheft
+// ---------------------------------------------------------------------------------------------
+
+/// Kontext (Stundenplan außerhalb der Sperre gelesen, Index geklont) und – falls angegeben – der
+/// geprüfte Pfad einer Berichtsheft-Woche.
+fn bh_kontext(root: &Path, index: &SharedIndex, woche: Option<&str>) -> AppResult<(Option<RelPath>, berichtsheft::Kontext)> {
+    let (plan, _) = unterricht::load_stundenplan(root, &RetryPolicy::short());
+    with_index(index, |idx| {
+        let pfad = woche.map(|p| berichtsheft::woche_pfad(idx, p)).transpose()?;
+        Ok((pfad, berichtsheft::Kontext::aus_index(idx, plan)))
+    })
+}
+
+/// KI-Zugang für einen Berichtsheft-Vorgang (nur auf Klick, Schlüssel aus dem Anmeldeinformationsspeicher).
+fn bh_ki(modell: &str) -> AppResult<ki::AnthropicProvider> {
+    let schluessel = ki::schluessel_laden()?.ok_or(AppError::KiKeinSchluessel)?;
+    ki::AnthropicProvider::new(schluessel, modell)
+}
+
+/// Wochenliste (neueste zuerst, fehlende Wochen eingereiht). `datum` fehlt → heute (Debug: `COCKPIT_NOW`).
+#[tauri::command]
+pub async fn berichtsheft_uebersicht(state: State<'_, AppState>, datum: Option<String>) -> Result<BerichtsheftUebersicht, AppError> {
+    let root = state.root()?;
+    let index = state.index.clone();
+    let heute = datum_oder(datum, jetzt())?;
+    blocking(move || {
+        let (_, ctx) = bh_kontext(&root, &index, None)?;
+        Ok(berichtsheft::woche::uebersicht(&root, &ctx, heute))
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn berichtsheft_woche(state: State<'_, AppState>, path: RelPath) -> Result<BerichtsWoche, AppError> {
+    let root = state.root()?;
+    let index = state.index.clone();
+    blocking(move || {
+        let (pfad, ctx) = bh_kontext(&root, &index, Some(&path))?;
+        Ok(berichtsheft::woche::lesen(&root, &pfad.unwrap_or(path), &ctx)?.woche)
+    })
+    .await
+}
+
+/// Trockenlauf „Woche anlegen“ – schreibt nichts.
+#[tauri::command]
+pub async fn berichtsheft_woche_vorschau(state: State<'_, AppState>, req: NeueWoche) -> Result<WochenVorschau, AppError> {
+    let root = state.root()?;
+    let index = state.index.clone();
+    blocking(move || {
+        let (_, ctx) = bh_kontext(&root, &index, None)?;
+        berichtsheft::anlegen::vorschau(&root, &ctx, req.datum)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn berichtsheft_woche_anlegen(app: AppHandle, state: State<'_, AppState>, req: NeueWoche) -> Result<CreateResult, AppError> {
+    let root = state.root()?;
+    ensure_write_allowed(&root)?;
+    let ziel = StatusZiel::von(&state, root);
+    blocking(move || {
+        let (_, ctx) = bh_kontext(&ziel.root, &ziel.index, None)?;
+        let _schreibsperre = ziel.lock.lock().unwrap_or_else(|e| e.into_inner());
+        let result = berichtsheft::anlegen::anlegen(&ziel.index, &ziel.root, &ctx, req.datum, &ziel.writes, &RetryPolicy::write())?;
+        if let CreateResult::Created { report } = &result {
+            let same_root = ziel.index.read().unwrap_or_else(|e| e.into_inner()).as_ref().is_some_and(|i| i.root() == ziel.root);
+            if same_root {
+                emit_changed(&app, VaultChanged { changed: vec![], removed: vec![], own: vec![report.rel_path.clone()], full_rescan: false });
+            }
+        }
+        Ok(result)
+    })
+    .await
+}
+
+/// Nach einer M4-Änderung: in den Index übernehmen und `own` melden.
+fn bh_nach_schreiben(app: &AppHandle, ziel: &StatusZiel, a: &Aenderung) {
+    if let Some(r) = &a.report {
+        index_own_write(app, &ziel.index, &ziel.root, &r.rel_path);
+    }
+}
+
+/// „Aus Unterrichtsnotizen übernehmen“ – `vorschau: true` schreibt nichts; schreiben nur mit `basis`.
+#[tauri::command]
+pub async fn berichtsheft_schultage(app: AppHandle, state: State<'_, AppState>, req: SchultageUebernehmen) -> Result<Aenderung, AppError> {
+    let root = state.root()?;
+    ensure_write_allowed(&root)?;
+    let ziel = StatusZiel::von(&state, root);
+    blocking(move || {
+        let (pfad, ctx) = bh_kontext(&ziel.root, &ziel.index, Some(&req.path))?;
+        let req = SchultageUebernehmen { path: pfad.unwrap_or_default(), ..req };
+        let _schreibsperre = ziel.lock.lock().unwrap_or_else(|e| e.into_inner());
+        let a = berichtsheft::anlegen::schultage(&ziel.root, &ctx, &req, &ziel.writes, &RetryPolicy::write())?;
+        bh_nach_schreiben(&app, &ziel, &a);
+        Ok(a)
+    })
+    .await
+}
+
+/// Tag speichern (Stichpunkte oder Tagesart). `basis` = Stand der geladenen Woche.
+#[tauri::command]
+pub async fn berichtsheft_tag_speichern(app: AppHandle, state: State<'_, AppState>, req: TagSpeichern) -> Result<Aenderung, AppError> {
+    let root = state.root()?;
+    ensure_write_allowed(&root)?;
+    let ziel = StatusZiel::von(&state, root);
+    blocking(move || {
+        let (pfad, ctx) = bh_kontext(&ziel.root, &ziel.index, Some(&req.path))?;
+        let req = TagSpeichern { path: pfad.unwrap_or_default(), ..req };
+        let _schreibsperre = ziel.lock.lock().unwrap_or_else(|e| e.into_inner());
+        let a = berichtsheft::tag::speichern(&ziel.root, &ctx, &req, &ziel.writes, &RetryPolicy::write())?;
+        bh_nach_schreiben(&app, &ziel, &a);
+        Ok(a)
+    })
+    .await
+}
+
+/// Nachweis-Entwurf – mit KI nur auf ausdrücklichen Klick (`mitKi`). Schreibt nichts.
+#[tauri::command]
+pub async fn berichtsheft_nachweis(state: State<'_, AppState>, req: NachweisAnfrage) -> Result<NachweisEntwurf, AppError> {
+    let root = state.root()?;
+    let index = state.index.clone();
+    let config_dir = state.config_dir.clone();
+    let modell = state.ki_modell();
+    blocking(move || {
+        let (pfad, ctx) = bh_kontext(&root, &index, Some(&req.path))?;
+        let req = NachweisAnfrage { path: pfad.unwrap_or_default(), ..req };
+        if !req.mit_ki {
+            return berichtsheft::nachweis::entwurf(&root, &ctx, &req, None);
+        }
+        let provider = bh_ki(&modell)?;
+        let system = ki::prompt_berichtsheft(&config_dir);
+        let zugang = logbuch::KiZugang { provider: &provider, system: &system, verlauf_dir: Some(&config_dir) };
+        berichtsheft::nachweis::entwurf(&root, &ctx, &req, Some(zugang))
+    })
+    .await
+}
+
+/// Nachweis in die Woche schreiben – `vorschau: true` liefert den Diff, schreiben nur mit `basis`.
+#[tauri::command]
+pub async fn berichtsheft_nachweis_schreiben(app: AppHandle, state: State<'_, AppState>, req: NachweisSchreiben) -> Result<Aenderung, AppError> {
+    let root = state.root()?;
+    ensure_write_allowed(&root)?;
+    let ziel = StatusZiel::von(&state, root);
+    blocking(move || {
+        let (pfad, ctx) = bh_kontext(&ziel.root, &ziel.index, Some(&req.path))?;
+        let req = NachweisSchreiben { path: pfad.unwrap_or_default(), ..req };
+        let _schreibsperre = ziel.lock.lock().unwrap_or_else(|e| e.into_inner());
+        let a = berichtsheft::nachweis::schreiben(&ziel.root, &ctx, &req, &ziel.writes, &RetryPolicy::write())?;
+        bh_nach_schreiben(&app, &ziel, &a);
+        Ok(a)
+    })
+    .await
+}
+
+/// Lernfeld-Vorschläge – mit KI nur auf Klick. Schreibt nichts.
+#[tauri::command]
+pub async fn berichtsheft_lernfelder(state: State<'_, AppState>, req: LernfeldAnfrage) -> Result<LernfeldEntwurf, AppError> {
+    let root = state.root()?;
+    let index = state.index.clone();
+    let config_dir = state.config_dir.clone();
+    let modell = state.ki_modell();
+    blocking(move || {
+        let (pfad, ctx) = bh_kontext(&root, &index, Some(&req.path))?;
+        let req = LernfeldAnfrage { path: pfad.unwrap_or_default(), ..req };
+        if !req.mit_ki {
+            return berichtsheft::lernfelder::entwurf(&root, &ctx, &req, None);
+        }
+        let provider = bh_ki(&modell)?;
+        let system = ki::prompt_lernfelder(&config_dir);
+        let zugang = logbuch::KiZugang { provider: &provider, system: &system, verlauf_dir: Some(&config_dir) };
+        berichtsheft::lernfelder::entwurf(&root, &ctx, &req, Some(zugang))
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn berichtsheft_lernfelder_schreiben(app: AppHandle, state: State<'_, AppState>, req: LernfelderSchreiben) -> Result<Aenderung, AppError> {
+    let root = state.root()?;
+    ensure_write_allowed(&root)?;
+    let ziel = StatusZiel::von(&state, root);
+    blocking(move || {
+        let (pfad, ctx) = bh_kontext(&ziel.root, &ziel.index, Some(&req.path))?;
+        let req = LernfelderSchreiben { path: pfad.unwrap_or_default(), ..req };
+        let _schreibsperre = ziel.lock.lock().unwrap_or_else(|e| e.into_inner());
+        let a = berichtsheft::lernfelder::schreiben(&ziel.root, &ctx, &req, &ziel.writes, &RetryPolicy::write())?;
+        bh_nach_schreiben(&app, &ziel, &a);
+        Ok(a)
+    })
+    .await
+}
+
+/// Vorschlag neuer Zeilen für `04 Betrieb/Betrieb.md` aus der Woche `path`. Schreibt nichts.
+#[tauri::command]
+pub async fn betrieb_vorschlag(state: State<'_, AppState>, path: RelPath) -> Result<BetriebVorschlag, AppError> {
+    let root = state.root()?;
+    let index = state.index.clone();
+    blocking(move || {
+        let (pfad, ctx) = bh_kontext(&root, &index, Some(&path))?;
+        berichtsheft::betrieb::vorschlag(&root, &ctx, &pfad.unwrap_or(path))
+    })
+    .await
+}
+
+/// `04 Betrieb/Betrieb.md` fortschreiben – **nur** nach Vorschau/Diff (`basis` Pflicht, Regel 9).
+#[tauri::command]
+pub async fn betrieb_fortschreiben(app: AppHandle, state: State<'_, AppState>, req: BetriebFortschreiben) -> Result<Aenderung, AppError> {
+    let root = state.root()?;
+    ensure_write_allowed(&root)?;
+    let ziel = StatusZiel::von(&state, root);
+    blocking(move || {
+        bh_kontext(&ziel.root, &ziel.index, Some(&req.woche_path))?;
+        let _schreibsperre = ziel.lock.lock().unwrap_or_else(|e| e.into_inner());
+        let a = berichtsheft::betrieb::fortschreiben(&ziel.root, &req, &ziel.writes, &RetryPolicy::write())?;
+        bh_nach_schreiben(&app, &ziel, &a);
+        Ok(a)
+    })
+    .await
+}
+
 fn ki_status_jetzt(state: &AppState) -> KiStatus {
     let (gespeichert, fehler) = match ki::schluessel_laden() {
         Ok(s) => (s.is_some(), None),
@@ -825,6 +1047,14 @@ mod tests {
         assert_eq!(le, "crlf");
         let art = serde_json::to_value(crate::model::TagArt::Betriebstag).unwrap();
         assert_eq!(art, "betriebstag");
+        // M4: Argumentnamen wie im Vertrag (camelCase)
+        let req: crate::model::BetriebFortschreiben =
+            serde_json::from_value(serde_json::json!({"wochePath": "04 Betrieb/Wochen/2026-KW46.md", "zeilen": [["a", "b"]], "vorschau": true}))
+                .unwrap();
+        assert!(req.vorschau && req.basis.is_none());
+        let req: crate::model::NachweisAnfrage =
+            serde_json::from_value(serde_json::json!({"path": "x.md", "mitKi": false})).unwrap();
+        assert!(!req.privat_erlauben);
         let req: NeueUnterrichtsnotiz =
             serde_json::from_value(serde_json::json!({"datum": "2026-11-16", "fach": "GEC", "block": 1, "lernfeld": null, "thema": null}))
                 .unwrap();

@@ -947,9 +947,432 @@ pub struct FragenEinstellungen {
     pub geklaert_modus: GeklaertModus,
 }
 
+// ---------------------------------------------------------------------------------------------
+// M4: Berichtsheft
+// ---------------------------------------------------------------------------------------------
+
+/// Abschnitt der Wochennotiz, unter dem ein Tag steht.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TagAbschnitt {
+    Berufsschule,
+    Betrieb,
+}
+
+/// Art eines Berichtsheft-Tages. Im Vertrag heißt der Typ `TagArt` – in Rust gibt es den Namen
+/// schon (M1, „Heute“), die Werte auf der Leitung sind dieselben.
+///
+/// **Regel 3:** „Krank“ ist nur eine Tagesart – es gibt kein Feld und keinen Text für eine Diagnose.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum BerichtsTagArt {
+    #[default]
+    Stichpunkte,
+    /// „Arbeitsunfähig erkrankt“ – ohne jede weitere Angabe
+    Krank,
+    Urlaub,
+    Feiertag,
+    Entfallen,
+}
+
+/// Stand des ausformulierten Nachweises eines Tages.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum NachweisStand {
+    #[default]
+    Fehlt,
+    /// nur `⟨…⟩` oder „*noch einzutragen*“
+    Platzhalter,
+    Vorhanden,
+}
+
+/// Ein Stichpunkt eines Tages (`- …` unter der Tages-Überschrift).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Stichpunkt {
+    /// 1-basierte Zeile in der Datei (wie `Task.line`)
+    pub line: usize,
+    /// ohne `- `
+    pub text: String,
+    /// „ohne Substanz“ (Regel 4) – wird im Nachweis markiert, nicht ausformuliert
+    pub luecke: bool,
+    /// Gesundheitsangabe (Regel 3) – geht nie an die KI und nie in den Nachweis
+    pub diagnose: Option<String>,
+    /// Berufsschule: Kürzel der Fach-Zeile
+    pub fach: Option<String>,
+    /// Wikilink-Ziele der Zeile
+    pub links: Vec<String>,
+}
+
+/// Eine Unterrichtsnotiz der Woche.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WochenUnterricht {
+    pub path: RelPath,
+    pub title: String,
+    /// Kürzel
+    pub fach: Option<String>,
+    pub thema: Option<String>,
+    pub datum: NaiveDate,
+    /// steht schon als `[[…]]` im Tagesabschnitt der Woche
+    pub verlinkt: bool,
+    pub privat: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BerichtsTag {
+    pub abschnitt: TagAbschnitt,
+    pub datum: NaiveDate,
+    /// „Dienstag“
+    pub wochentag: String,
+    /// `None` = erwarteter Tag ohne Überschrift in der Datei
+    pub ueberschrift_zeile: Option<usize>,
+    pub art: BerichtsTagArt,
+    pub stichpunkte: Vec<Stichpunkt>,
+    /// kein Stichpunkt mit Inhalt
+    pub fehlt: bool,
+    /// nur einfache Listenpunkte – die App darf die Zeilen ersetzen
+    pub bearbeitbar: bool,
+    pub hinweis: Option<String>,
+    /// nur Berufsschule: Unterrichtsnotizen dieses Tages
+    pub unterricht: Vec<WochenUnterricht>,
+    pub nachweis: NachweisStand,
+}
+
+/// Zeile der Tabelle unter „Bezug zu Lernfeldern“.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LernfeldZeile {
+    pub line: usize,
+    pub taetigkeit: String,
+    pub lernfelder: Vec<u32>,
+    /// Originalzelle (mit `\|`)
+    pub zelle: String,
+}
+
+/// `- [ ]` / `> - [ ]` unter „Offen vor dem Abzeichnen“ (Abschnitt oder Callout).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OffenerPunkt {
+    pub line: usize,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BerichtsWoche {
+    pub path: RelPath,
+    pub title: String,
+    pub jahr: i32,
+    pub kw: u32,
+    pub montag: NaiveDate,
+    pub sonntag: NaiveDate,
+    pub status: Option<String>,
+    pub abgezeichnet: bool,
+    pub stunden: Option<String>,
+    pub lernfelder: Vec<u32>,
+    /// nach Datum, Berufsschule vor Betrieb am selben Tag
+    pub tage: Vec<BerichtsTag>,
+    pub lernfeld_tabelle: Vec<LernfeldZeile>,
+    pub offene_punkte: Vec<OffenerPunkt>,
+    pub warnungen: Vec<String>,
+    pub version: NoteVersion,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WochenZeile {
+    /// `None` = Woche ohne Notiz
+    pub path: Option<RelPath>,
+    /// `2026-KW46`
+    pub stem: String,
+    pub jahr: i32,
+    pub kw: u32,
+    pub montag: NaiveDate,
+    pub sonntag: NaiveDate,
+    pub status: Option<String>,
+    pub abgezeichnet: bool,
+    pub stunden: Option<String>,
+    /// `Di 10.11.`
+    pub fehlende_tage: Vec<String>,
+    pub offene_punkte: usize,
+    pub luecken: usize,
+    pub diagnosen: usize,
+    pub aktuell: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BerichtsheftUebersicht {
+    pub heute: NaiveDate,
+    pub aktuelle_woche: String,
+    pub aktuelle_vorhanden: bool,
+    /// neueste zuerst; fehlende Wochen zwischen der ältesten Notiz und heute eingereiht
+    pub wochen: Vec<WochenZeile>,
+    /// Badge: Vorwochen mit fehlenden Tagen, offenen Punkten, Lücken oder Gesundheitsangaben
+    pub offen_vorwochen: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NeueWoche {
+    /// irgendein Tag der Woche
+    pub datum: NaiveDate,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WochenVorschau {
+    pub rel_path: RelPath,
+    pub text: String,
+    pub existiert: Option<RelPath>,
+    /// Unterrichtsnotizen, die als Fach-Zeile eingetragen werden
+    pub eingetragen: Vec<RelPath>,
+    pub warnungen: Vec<String>,
+}
+
+/// Eine (geplante oder geschriebene) Änderung an einer bestehenden Datei – Grundlage des Diffs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Aenderung {
+    pub path: RelPath,
+    /// dekodierter Text (`\n`) vor der Änderung
+    pub vorher: String,
+    /// ganze Datei, wie sie geschrieben würde
+    pub nachher: String,
+    /// Stand beim Lesen = Basis für das Schreiben
+    pub version: NoteVersion,
+    pub unveraendert: bool,
+    pub warnungen: Vec<String>,
+    /// nur nach dem Schreiben
+    pub report: Option<WriteReport>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SchultageUebernehmen {
+    pub path: RelPath,
+    pub vorschau: bool,
+    #[serde(default)]
+    pub basis: Option<NoteVersion>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TagSpeichern {
+    pub path: RelPath,
+    pub abschnitt: TagAbschnitt,
+    pub datum: NaiveDate,
+    pub art: BerichtsTagArt,
+    /// nur bei `stichpunkte` – sonst muss die Liste leer sein (Regel 3)
+    #[serde(default)]
+    pub stichpunkte: Vec<String>,
+    pub basis: NoteVersion,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NachweisAnfrage {
+    pub path: RelPath,
+    pub mit_ki: bool,
+    /// gilt nur für **diesen** Vorgang (Regel 10)
+    #[serde(default)]
+    pub privat_erlauben: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NachweisTag {
+    pub datum: NaiveDate,
+    pub abschnitt: TagAbschnitt,
+    #[serde(default)]
+    pub wochentag: String,
+    #[serde(default)]
+    pub ueberschrift: String,
+    #[serde(default)]
+    pub absaetze: Vec<String>,
+    /// werden als `⟨Lücke: „…“ – Gegenstand fehlt⟩` ans Ende des Blocks gesetzt
+    #[serde(default)]
+    pub luecken: Vec<String>,
+    #[serde(default)]
+    pub vorhanden: NachweisStand,
+    /// Vorschlag: `true`, wenn `vorhanden != vorhanden`
+    #[serde(default)]
+    pub uebernehmen: bool,
+    #[serde(default)]
+    pub ki: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NachweisQuelle {
+    pub path: RelPath,
+    pub title: String,
+    pub privat: bool,
+    /// mit KI: wurde gesendet; ohne KI: würde gesendet
+    pub gesendet: bool,
+    pub ek_entfernt: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NachweisEntwurf {
+    pub path: RelPath,
+    pub tage: Vec<NachweisTag>,
+    pub quellen: Vec<NachweisQuelle>,
+    pub mit_ki: bool,
+    pub ki: Option<KiAufruf>,
+    /// `Di 10.11.` – Tage ohne Inhalt werden nicht formuliert
+    pub fehlende_tage: Vec<String>,
+    pub warnungen: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NachweisSchreiben {
+    pub path: RelPath,
+    /// nur die zu schreibenden Tage
+    pub tage: Vec<NachweisTag>,
+    pub vorschau: bool,
+    #[serde(default)]
+    pub basis: Option<NoteVersion>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LernfeldVorschlag {
+    pub taetigkeit: String,
+    pub abschnitt: TagAbschnitt,
+    /// `Di 10.11.` / `GEC 09.11.2026`
+    pub quelle: String,
+    pub lernfelder: Vec<u32>,
+    /// `Betrieb.md` | `Lernfeld der Unterrichtsnotiz` | `KI` | ``
+    pub grund: String,
+    pub schon_in_tabelle: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LernfeldAnfrage {
+    pub path: RelPath,
+    pub mit_ki: bool,
+    #[serde(default)]
+    pub privat_erlauben: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LernfeldEntwurf {
+    pub path: RelPath,
+    pub vorschlaege: Vec<LernfeldVorschlag>,
+    pub lernfelder: Vec<LernfeldInfo>,
+    pub ki: Option<KiAufruf>,
+    pub warnungen: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NeueLernfeldZeile {
+    pub taetigkeit: String,
+    pub lernfelder: Vec<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LernfelderSchreiben {
+    pub path: RelPath,
+    pub zeilen: Vec<NeueLernfeldZeile>,
+    pub vorschau: bool,
+    #[serde(default)]
+    pub basis: Option<NoteVersion>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BetriebZeile {
+    /// Länge = Spaltenzahl
+    pub zellen: Vec<String>,
+    pub taetigkeit: String,
+    pub uebernehmen: bool,
+    pub grund: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BetriebVorschlag {
+    pub betrieb_path: RelPath,
+    pub spalten: Vec<String>,
+    pub zeilen: Vec<BetriebZeile>,
+    pub schon_vorhanden: Vec<String>,
+    pub warnungen: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BetriebFortschreiben {
+    pub woche_path: RelPath,
+    pub zeilen: Vec<Vec<String>>,
+    pub vorschau: bool,
+    #[serde(default)]
+    pub basis: Option<NoteVersion>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn m4_typen_im_vertrag() {
+        assert_eq!(serde_json::to_value(TagAbschnitt::Berufsschule).unwrap(), "berufsschule");
+        assert_eq!(serde_json::to_value(BerichtsTagArt::Krank).unwrap(), "krank");
+        assert_eq!(serde_json::to_value(BerichtsTagArt::Stichpunkte).unwrap(), "stichpunkte");
+        assert_eq!(serde_json::to_value(NachweisStand::Platzhalter).unwrap(), "platzhalter");
+        let v = NoteVersion { sha256: "ab".into(), modified_ms: 1, size: 2 };
+        let req: TagSpeichern = serde_json::from_value(serde_json::json!({
+            "path": "a.md", "abschnitt": "betrieb", "datum": "2026-11-10", "art": "urlaub", "stichpunkte": [],
+            "basis": {"sha256": "ab", "modifiedMs": 1, "size": 2}
+        }))
+        .unwrap();
+        assert_eq!((req.art, req.basis), (BerichtsTagArt::Urlaub, v.clone()));
+        let req: NachweisSchreiben = serde_json::from_value(serde_json::json!({
+            "path": "a.md", "vorschau": true,
+            "tage": [{"datum": "2026-11-10", "abschnitt": "betrieb", "ueberschrift": "x", "absaetze": ["a"], "luecken": []}]
+        }))
+        .unwrap();
+        assert!(req.basis.is_none() && req.tage[0].vorhanden == NachweisStand::Fehlt);
+        let a = Aenderung {
+            path: "a.md".into(),
+            vorher: "a".into(),
+            nachher: "b".into(),
+            version: v,
+            unveraendert: false,
+            warnungen: vec![],
+            report: None,
+        };
+        let s = serde_json::to_value(a).unwrap();
+        assert_eq!(s["unveraendert"], false);
+        assert_eq!(s["version"]["modifiedMs"], 1);
+        let z = WochenZeile {
+            path: None,
+            stem: "2026-KW43".into(),
+            jahr: 2026,
+            kw: 43,
+            montag: NaiveDate::from_ymd_opt(2026, 10, 19).unwrap(),
+            sonntag: NaiveDate::from_ymd_opt(2026, 10, 25).unwrap(),
+            status: None,
+            abgezeichnet: false,
+            stunden: None,
+            fehlende_tage: vec![],
+            offene_punkte: 0,
+            luecken: 0,
+            diagnosen: 0,
+            aktuell: false,
+        };
+        let s = serde_json::to_value(z).unwrap();
+        assert_eq!(s["fehlendeTage"], serde_json::json!([]));
+        assert_eq!(s["offenePunkte"], 0);
+    }
 
     #[test]
     fn logbuch_status_aus_text() {

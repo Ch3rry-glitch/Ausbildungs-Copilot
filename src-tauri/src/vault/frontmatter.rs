@@ -130,6 +130,30 @@ impl NoteText {
         true
     }
 
+    /// Setzt eine Liste (Einträge als rohe YAML-Skalare). Der Stil bleibt: eine Blockliste
+    /// (`key:` + `  - a`) bleibt Blockliste mit derselben Einrückung, sonst Inline `[a, b]`.
+    pub fn set_list(&mut self, key: &str, items: &[String]) -> bool {
+        let inline = format!("[{}]", items.join(", "));
+        let Some(idx) = self.find_key(key) else { return self.set_scalar(key, &inline) };
+        let cont = self.continuation_len(idx);
+        let line = self.yaml_lines[idx].clone();
+        let wert = strip_eol(&line)[key.len() + 1..].trim().to_string();
+        let erste = self.yaml_lines[idx + 1..=idx + cont].iter().map(|l| strip_eol(l)).find(|l| l.trim_start().starts_with('-'));
+        let Some(erste) = erste.filter(|_| wert.is_empty() && !items.is_empty()) else { return self.set_scalar(key, &inline) };
+        let indent = erste[..erste.len() - erste.trim_start().len()].to_string();
+        let eol = match &line[strip_eol(&line).len()..] {
+            "" => self.eol.to_string(),
+            e => e.to_string(),
+        };
+        let mut neu = vec![format!("{key}:{eol}")];
+        neu.extend(items.iter().map(|it| format!("{indent}- {it}{eol}")));
+        if self.yaml_lines[idx..=idx + cont] == neu[..] {
+            return false;
+        }
+        self.yaml_lines.splice(idx..=idx + cont, neu);
+        true
+    }
+
     /// Steht der Schlüssel in der Frontmatter (gleiche Erkennung wie beim Setzen)?
     pub fn has_key(&self, key: &str) -> bool {
         self.find_key(key).is_some()

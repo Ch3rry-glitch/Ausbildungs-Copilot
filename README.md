@@ -60,6 +60,30 @@ Logbucheinträge für Moodle. Der Vault bleibt die einzige Wahrheit; Obsidian fu
 - Code: `src-tauri/src/aufgaben.rs` (Listen, Abhaken, gelöst), `src-tauri/src/fragen.rs` (Fragen,
   Nochmal, geklärt), Tests in `src-tauri/tests/m3_aufgaben.rs`.
 
+## Berichtsheft (M4)
+
+- **Was die App schreibt:** neue Wochen `04 Betrieb/Wochen/<JJJJ>-KW<nn>.md` aus der Vorlage
+  `99 Meta/Templates/Berichtsheft-Woche.md` (Vorschau vorher, nie überschreiben; nur `kw`, `zeitraum`,
+  KW-/Datums-Platzhalter, Verknüpft-Links und die Fach-Zeilen der Schultage werden gefüllt). In
+  bestehenden Wochen ändert sie nur die betroffenen Zeilen: Tag speichern, Schultage aus den
+  Unterrichtsnotizen, Tagesblöcke im „Ausformulierten Nachweis“ (Callouts dahinter bleiben byte-gleich),
+  Zeilen der Lernfeld-Tabelle + Frontmatter `lernfelder`. `04 Betrieb/Betrieb.md` bekommt nur neue
+  Zeilen in der Tabelle „Tätigkeit … | Lernfeld …“.
+- **Immer erst Vorschau/Diff (Regel 9):** jeder schreibende Befehl liefert mit `vorschau: true` den
+  ganzen neuen Text; geschrieben wird nur mit der `basis` aus dieser Vorschau – hat Obsidian die Datei
+  inzwischen geändert, schreibt die App nichts („bitte Vorschau neu laden“).
+- **Regel 3:** Krankheit ist nur die Tagesart „Arbeitsunfähig erkrankt“ – kein Feld, kein Freitext, kein
+  Prompt für eine Diagnose; Stichpunkte, Nachweis-Texte und KI-Antworten mit Diagnose-Wörtern
+  (`berichtsheft::diagnose_wort`) werden abgelehnt, Krank-Tage gehen nie an die KI.
+  **Regel 4:** dünne Stichpunkte („Einschulung“) werden als `⟨Lücke: „…“ – Gegenstand fehlt⟩` markiert,
+  nicht ausformuliert; KI-Antworten mit Sätzen ohne Beleg, fremden Zahlen oder nicht markierten Lücken
+  werden verworfen (einmal neu angefordert, dann Fehler).
+- **KI** nur auf Klick, `10 Privat/` nur pro Vorgang, EK wird vorher entfernt. Prompts:
+  `prompts/berichtsheft.md` (Nachweis) und `prompts/berichtsheft-lernfelder.md` (Lernfeldbezug) – eigene
+  Fassungen unter `%APPDATA%\ausbildungs-cockpit\prompts\` haben Vorrang.
+- Code: `src-tauri/src/berichtsheft/` (`woche`, `anlegen`, `tag`, `nachweis`, `lernfelder`, `betrieb`,
+  `regeln`), Tests in `src-tauri/tests/m4_berichtsheft.rs`.
+
 ## Installation (für Mitschüler)
 
 1. Unter [Releases](https://github.com/Ch3rry-glitch/Ausbildungs-Copilot/releases) die Datei

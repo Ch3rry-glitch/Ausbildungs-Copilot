@@ -51,7 +51,7 @@ const W_KEIN_DATUM: &str = "Vorlage: Überschrift ohne „JJJJ-MM-TT“ – das 
 const W_KEIN_FACH: &str = "Vorlage: Überschrift ohne „Fach“ – das Kürzel steht nur im Frontmatter.";
 const W_KEIN_THEMA: &str = "Vorlage: Überschrift ohne „Thema“ – das Thema steht nur im Frontmatter.";
 const W_KEINE_FACHZEILE: &str = "Vorlage hat keine Zeile „**Fach:**“ – Fachlink steht nur im Frontmatter.";
-const W_FREMDE_PLATZHALTER: &str = "Vorlage enthält Platzhalter „{{…}}“ oder „<% … %>“ (Obsidian-Vorlagen/Templater). Die App füllt sie nicht aus – sie bleiben wörtlich stehen.";
+pub(crate) const W_FREMDE_PLATZHALTER: &str ="Vorlage enthält Platzhalter „{{…}}“ oder „<% … %>“ (Obsidian-Vorlagen/Templater). Die App füllt sie nicht aus – sie bleiben wörtlich stehen.";
 const W_KEIN_YAML: &str = "Frontmatter der neuen Notiz ist kein gültiges YAML.";
 
 static THEMA_MIT_TRENNER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s*[–—-]\s*Thema\b").unwrap());
@@ -631,7 +631,21 @@ pub fn create_note(
     if let Some(existing) = v.existiert {
         return Ok(CreateResult::Exists { rel_path: existing });
     }
-    let (_, rel) = guard::resolve_for_write(root, &v.rel_path)?;
+    anlegen_mit_index(index, root, &v.rel_path, &v.text, v.warnungen, writes, p)
+}
+
+/// Neue Datei anlegen (nie überschreiben) und sofort in den Index übernehmen. Fehlende Ordner werden
+/// vorher im Index bekannt gemacht, damit ihr Ereignis keinen Vollscan auslöst.
+pub(crate) fn anlegen_mit_index(
+    index: &SharedIndex,
+    root: &Path,
+    rel: &str,
+    text: &str,
+    warnungen: Vec<String>,
+    writes: &SelfWrites,
+    p: &RetryPolicy,
+) -> AppResult<CreateResult> {
+    let (_, rel) = guard::resolve_for_write(root, rel)?;
 
     // 3. neue Ordner vorher bekannt machen → ihr Ereignis löst keinen Vollscan aus
     let missing = missing_folders(root, &rel);
@@ -652,7 +666,7 @@ pub fn create_note(
     };
 
     // 4. schreiben (ohne Index-Sperre)
-    let version = match write::create_new(root, &rel, &v.text, p, writes) {
+    let version = match write::create_new(root, &rel, text, p, writes) {
         Ok(CreateOutcome::Created(version)) => version,
         Ok(CreateOutcome::Exists(disk)) => {
             undo_folders();
@@ -671,7 +685,7 @@ pub fn create_note(
     }
 
     Ok(CreateResult::Created {
-        report: WriteReport { rel_path: rel, created: true, version, created_folders: missing, warnungen: v.warnungen },
+        report: WriteReport { rel_path: rel, created: true, version, created_folders: missing, warnungen },
     })
 }
 
