@@ -190,49 +190,51 @@ function BetriebTabelle({
   onAendern: (id: number, f: (z: EditZeile) => EditZeile) => void;
 }) {
   return (
-    <table className="lern-table bh-table">
-      <thead>
-        <tr>
-          <th className="center">übernehmen</th>
-          {spalten.map((s, i) => (
-            <th key={i}>{s}</th>
-          ))}
-          <th>Grund</th>
-        </tr>
-      </thead>
-      <tbody>
-        {zeilen.map((z) => (
-          <tr key={z.id} className={z.uebernehmen || z.geschrieben ? "" : "bh-zeile-aus"}>
-            <td className="center">
-              {z.geschrieben ? (
-                <span className="badge mint">{Icon.check} eingetragen</span>
-              ) : (
-                <input
-                  type="checkbox"
-                  className="auftrag-check"
-                  checked={z.uebernehmen}
-                  onChange={(e) => onAendern(z.id, (x) => ({ ...x, uebernehmen: e.target.checked }))}
-                  disabled={busy}
-                  aria-label={`„${z.taetigkeit}“ übernehmen`}
-                />
-              )}
-            </td>
-            {z.zellen.map((c, i) => (
-              <td key={i} className="bh-zelle-breit">
-                <input
-                  className="input bh-cell-input"
-                  value={c}
-                  onChange={(e) => onAendern(z.id, (x) => ({ ...x, zellen: x.zellen.map((y, k) => (k === i ? e.target.value : y)) }))}
-                  disabled={busy || z.geschrieben}
-                  spellCheck
-                  aria-label={spalten[i]}
-                />
-              </td>
+    <div className="bh-tabelle-scroll">
+      <table className="lern-table bh-table">
+        <thead>
+          <tr>
+            <th className="center">übernehmen</th>
+            {spalten.map((s, i) => (
+              <th key={i}>{s}</th>
             ))}
-            <td>{z.grund || (z.uebernehmen ? "" : "nur Schule")}</td>
+            <th>Grund</th>
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {zeilen.map((z) => (
+            <tr key={z.id} className={z.uebernehmen || z.geschrieben ? "" : "bh-zeile-aus"}>
+              <td className="center">
+                {z.geschrieben ? (
+                  <span className="badge mint">{Icon.check} eingetragen</span>
+                ) : (
+                  <input
+                    type="checkbox"
+                    className="auftrag-check"
+                    checked={z.uebernehmen}
+                    onChange={(e) => onAendern(z.id, (x) => ({ ...x, uebernehmen: e.target.checked }))}
+                    disabled={busy}
+                    aria-label={`„${z.taetigkeit}“ übernehmen`}
+                  />
+                )}
+              </td>
+              {z.zellen.map((c, i) => (
+                <td key={i} className="bh-zelle-breit">
+                  <input
+                    className="input bh-cell-input"
+                    value={c}
+                    onChange={(e) => onAendern(z.id, (x) => ({ ...x, zellen: x.zellen.map((y, k) => (k === i ? e.target.value : y)) }))}
+                    disabled={busy || z.geschrieben}
+                    spellCheck
+                    aria-label={spalten[i]}
+                  />
+                </td>
+              ))}
+              <td>{z.grund || (z.uebernehmen ? "" : "nur Schule")}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }

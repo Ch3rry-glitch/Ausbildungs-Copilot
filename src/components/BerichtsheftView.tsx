@@ -175,7 +175,7 @@ export function BerichtsheftView({
           <div className="page-sub">Wochennotizen aus „04 Betrieb/Wochen“ – geschrieben wird erst nach Vorschau und Bestätigung.</div>
         </div>
         {u && !u.aktuelleVorhanden && (
-          <button className="btn primary" onClick={() => setNeu({ datum: u.heute })}>
+          <button className="btn primary bh-neu-knopf" onClick={() => setNeu({ datum: u.heute })}>
             {Icon.plus} Diese Woche anlegen
           </button>
         )}
@@ -311,7 +311,7 @@ function WochenKopf({ woche, onEditor, onObsidian }: { woche: BerichtsWoche; onE
   return (
     <div className="lb-head">
       <div>
-        <div className="editor-title-row">
+        <div className="editor-title-row bh-kopf-titel">
           <h2 className="preview-title">
             KW {woche.kw} · {formatDatum(woche.montag)} – {formatDatum(woche.sonntag)}
           </h2>

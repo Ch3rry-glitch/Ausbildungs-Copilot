@@ -184,18 +184,20 @@ function TagKarte({
             ohne Überschrift
           </span>
         )}
-        <span className="filter-spacer" />
-        <NachweisBadge stand={t.nachweis} />
-        {t.bearbeitbar && !bearbeitung && (
-          <button
-            className="btn small"
-            onClick={onBearbeiten}
-            disabled={dirty || belegt}
-            title={dirty ? "Erst die Wochennotiz im Editor speichern" : belegt ? "Erst den anderen Tag speichern oder abbrechen" : "Tagesart und Stichpunkte bearbeiten"}
-          >
-            {Icon.edit} Bearbeiten
-          </button>
-        )}
+        {/* rechts als Gruppe – bricht bei schmaler Karte gemeinsam um und bleibt rechtsbündig */}
+        <span className="bh-tag-aktionen">
+          <NachweisBadge stand={t.nachweis} />
+          {t.bearbeitbar && !bearbeitung && (
+            <button
+              className="btn small"
+              onClick={onBearbeiten}
+              disabled={dirty || belegt}
+              title={dirty ? "Erst die Wochennotiz im Editor speichern" : belegt ? "Erst den anderen Tag speichern oder abbrechen" : "Tagesart und Stichpunkte bearbeiten"}
+            >
+              {Icon.edit} Bearbeiten
+            </button>
+          )}
+        </span>
       </div>
 
       {t.hinweis && (

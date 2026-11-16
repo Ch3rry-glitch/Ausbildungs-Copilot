@@ -168,58 +168,60 @@ export function LernfelderTab({
           {zeilen.length === 0 ? (
             <div className="hint">Keine Tätigkeiten gefunden – erst im Reiter „Tage“ Stichpunkte eintragen.</div>
           ) : (
-            <table className="lern-table bh-table">
-              <thead>
-                <tr>
-                  <th>Tätigkeit</th>
-                  <th>Quelle</th>
-                  <th>Lernfeld(er)</th>
-                  <th>Grund</th>
-                  <th className="center">übernehmen</th>
-                </tr>
-              </thead>
-              <tbody>
-                {zeilen.map((z) => (
-                  <tr key={z.id} className={z.uebernehmen ? "" : "bh-zeile-aus"}>
-                    <td className="bh-zelle-breit">
-                      <input
-                        className="input bh-cell-input"
-                        value={z.taetigkeit}
-                        onChange={(e) => aendere(z.id, (x) => ({ ...x, taetigkeit: e.target.value }))}
-                        disabled={busy}
-                        spellCheck
-                        aria-label="Tätigkeit"
-                      />
-                      {z.inTabelle && <span className="badge muted bh-zelle-badge">schon in der Tabelle</span>}
-                    </td>
-                    <td>
-                      <div>{z.quelle.quelle}</div>
-                      <div className="hint">{ABSCHNITT_LABEL[z.quelle.abschnitt]}</div>
-                    </td>
-                    <td>
-                      <LernfeldAuswahl
-                        gewaehlt={z.lernfelder}
-                        lernfelder={lernfelder}
-                        disabled={busy}
-                        onChange={(lf) => setzeLernfelder(z.id, lf)}
-                      />
-                    </td>
-                    <td>{z.quelle.grund || <span className="lern-leer">—</span>}</td>
-                    <td className="center">
-                      <input
-                        type="checkbox"
-                        className="auftrag-check"
-                        checked={z.uebernehmen}
-                        onChange={(e) => aendere(z.id, (x) => ({ ...x, uebernehmen: e.target.checked }))}
-                        disabled={busy || z.lernfelder.length === 0}
-                        title={z.lernfelder.length === 0 ? "Erst ein Lernfeld wählen" : "In die Tabelle der Woche übernehmen"}
-                        aria-label={`„${z.taetigkeit}“ übernehmen`}
-                      />
-                    </td>
+            <div className="bh-tabelle-scroll">
+              <table className="lern-table bh-table">
+                <thead>
+                  <tr>
+                    <th>Tätigkeit</th>
+                    <th>Quelle</th>
+                    <th>Lernfeld(er)</th>
+                    <th>Grund</th>
+                    <th className="center">übernehmen</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {zeilen.map((z) => (
+                    <tr key={z.id} className={z.uebernehmen ? "" : "bh-zeile-aus"}>
+                      <td className="bh-zelle-breit">
+                        <input
+                          className="input bh-cell-input"
+                          value={z.taetigkeit}
+                          onChange={(e) => aendere(z.id, (x) => ({ ...x, taetigkeit: e.target.value }))}
+                          disabled={busy}
+                          spellCheck
+                          aria-label="Tätigkeit"
+                        />
+                        {z.inTabelle && <span className="badge muted bh-zelle-badge">schon in der Tabelle</span>}
+                      </td>
+                      <td>
+                        <div>{z.quelle.quelle}</div>
+                        <div className="hint">{ABSCHNITT_LABEL[z.quelle.abschnitt]}</div>
+                      </td>
+                      <td>
+                        <LernfeldAuswahl
+                          gewaehlt={z.lernfelder}
+                          lernfelder={lernfelder}
+                          disabled={busy}
+                          onChange={(lf) => setzeLernfelder(z.id, lf)}
+                        />
+                      </td>
+                      <td>{z.quelle.grund || <span className="lern-leer">—</span>}</td>
+                      <td className="center">
+                        <input
+                          type="checkbox"
+                          className="auftrag-check"
+                          checked={z.uebernehmen}
+                          onChange={(e) => aendere(z.id, (x) => ({ ...x, uebernehmen: e.target.checked }))}
+                          disabled={busy || z.lernfelder.length === 0}
+                          title={z.lernfelder.length === 0 ? "Erst ein Lernfeld wählen" : "In die Tabelle der Woche übernehmen"}
+                          aria-label={`„${z.taetigkeit}“ übernehmen`}
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
           {zeilen.length > 0 && (
             <div className="lb-actions">

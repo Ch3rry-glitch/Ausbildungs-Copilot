@@ -625,6 +625,10 @@ input[type="date"].input::-webkit-calendar-picker-indicator { filter: invert(0.8
 
 /* Wochenliste */
 .bh-grid { grid-template-columns: 330px 1fr; }
+.bh-neu-knopf { flex: none; white-space: nowrap; }
+/* Kopf der Woche: Status-Badges brechen bei schmalem Fenster um statt seitlich zu scrollen */
+.bh-kopf-titel { flex-wrap: wrap; row-gap: 6px; }
+.bh-kopf-titel .preview-title { min-width: 0; }
 .bh-woche { padding: 10px 12px; }
 .bh-woche.aktuell { border-left: 3px solid var(--purple-2); }
 .bh-woche.ohne { opacity: 0.55; cursor: default; }
@@ -647,12 +651,13 @@ input[type="date"].input::-webkit-calendar-picker-indicator { filter: invert(0.8
 .bh-tag.aus { opacity: 0.6; }
 .bh-tag-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .bh-tag-titel { font-weight: 700; font-size: 13.5px; color: var(--text); }
+.bh-tag-aktionen { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; }
 .bh-punkte { list-style: none; margin: 2px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .bh-punkt { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; padding: 5px 10px; border-radius: 10px; border-left: 3px solid rgba(255, 255, 255, 0.12); background: rgba(0, 0, 0, 0.12); }
 .bh-punkt-text { font-size: 13px; color: var(--text); overflow-wrap: anywhere; user-select: text; }
 .bh-punkt-hinweis { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
 .bh-punkt-hinweis svg { width: 13px; height: 13px; }
-.bh-punkt-hinweis .lb-link { font-size: 12px; padding: 0; }
+.bh-punkt-hinweis .lb-link { font-size: 12px; padding: 0; white-space: nowrap; }
 .bh-punkt.luecke { border-left-color: var(--amber); background: rgba(252, 211, 77, 0.09); }
 .bh-punkt.luecke .bh-punkt-hinweis { color: var(--amber); }
 .bh-punkt.diagnose { border-left-color: var(--red); background: var(--red-bg); }
@@ -675,7 +680,9 @@ input[type="date"].input::-webkit-calendar-picker-indicator { filter: invert(0.8
 /* Tabellen mit Eingabefeldern (Lernfelder, Betrieb.md) */
 .bh-table td { vertical-align: middle; }
 .bh-table tr.bh-zeile-aus td { opacity: 0.6; }
-.bh-zelle-breit { min-width: 200px; }
+/* nur die Tabelle scrollt seitlich, nicht die ganze Wochenansicht */
+.bh-tabelle-scroll { overflow-x: auto; }
+.bh-zelle-breit { min-width: 130px; }
 .bh-cell-input { width: 100%; padding: 6px 9px; font-size: 12.5px; }
 .bh-zelle-badge { margin-top: 4px; }
 .bh-lf-chips { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; min-width: 150px; }
