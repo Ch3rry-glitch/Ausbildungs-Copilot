@@ -18,14 +18,15 @@ use crate::error::{AppError, AppResult};
 use crate::index::{self, VaultIndex};
 use crate::model::{
     AppStatus, AufgabeAbhaken, AufgabeErgebnis, AufgabenUebersicht, CreateResult, FachInfo, FolderInfo, FrageGeklaert,
-    FrageKlaeren, FragenEinstellungen, FragenUebersicht, HeuteTag, KiStatus, LernfeldInfo, LogbuchAnfrage,
+    FrageKlaeren, FragenEinstellungen, FragenUebersicht, HeuteTag, KarteikartenAnfrage, KarteikartenSet, KiStatus,
+    KlausurUebersicht, LernfeldInfo, LogbuchAnfrage, Quiz, QuizAnfrage, QuizQuellen,
     LogbuchEntwurf, LogbuchFach, LogbuchKopieren, LogbuchKopiert, LogbuchStatus, LogbuchStatusReport,
     LogbuchTextAnfrage, LogbuchUebersicht, NeueUnterrichtsnotiz, NoteContent, NoteMeta, NoteSummary, NoteVersion,
     NotizVorschau, RelPath, SaveResult, StarterReport, VaultChanged, WriteReport,
 };
 use crate::watcher::{self, SharedIndex, VaultWatcher};
 use crate::write::{self, RetryPolicy, SaveOutcome, SelfWrites};
-use crate::{aufgaben, fragen, guard, heute as heute_mod, ki, logbuch, obsidian, starter, unterricht};
+use crate::{aufgaben, fragen, guard, heute as heute_mod, ki, klausur, logbuch, obsidian, starter, unterricht};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
 pub const EVENT_VAULT_CHANGED: &str = "vault-changed";
@@ -787,6 +788,146 @@ pub async fn ki_modell_setzen(state: State<'_, AppState>, modell: String) -> Res
         config::save_to(&state.config_dir, &cfg)?;
     }
     Ok(ki_status_jetzt(&state))
+}
+
+// ---------------------------------------------------------------------------------------------
+// Klausur-Trainer
+// ---------------------------------------------------------------------------------------------
+
+fn klausur_fach(root: &Path, index: &SharedIndex, kurz: &str) -> AppResult<FachInfo> {
+    faecher_lesen(root, index)?
+        .into_iter()
+        .find(|f| f.kurz.eq_ignore_ascii_case(kurz.trim()))
+        .ok_or_else(|| AppError::InvalidInput(format!("Unbekanntes Fach „{kurz}“.")))
+}
+
+/// Fächer mit ihren Quellen. Schreibt nichts.
+#[tauri::command]
+pub async fn klausur_uebersicht(state: State<'_, AppState>) -> Result<KlausurUebersicht, AppError> {
+    let root = state.root()?;
+    let index = state.index.clone();
+    blocking(move || {
+        let faecher = faecher_lesen(&root, &index)?;
+        with_index(&index, |idx| Ok(klausur::uebersicht(idx, &faecher)))
+    })
+    .await
+}
+
+/// Mögliche Quellen eines Fachs – die Oberfläche zeigt sie vor dem KI-Aufruf. Schreibt nichts.
+#[tauri::command]
+pub async fn klausur_quellen(state: State<'_, AppState>, fach: String) -> Result<QuizQuellen, AppError> {
+    let root = state.root()?;
+    let index = state.index.clone();
+    blocking(move || {
+        let f = klausur_fach(&root, &index, &fach)?;
+        with_index(&index, |idx| Ok(klausur::quiz_quellen(idx, &f)))
+    })
+    .await
+}
+
+/// Quiz erzeugen – mit KI nur auf ausdrücklichen Klick (`mitKi`). Schreibt nichts in den Vault.
+#[tauri::command]
+pub async fn klausur_quiz(state: State<'_, AppState>, req: QuizAnfrage) -> Result<Quiz, AppError> {
+    let root = state.root()?;
+    let index = state.index.clone();
+    let config_dir = state.config_dir.clone();
+    let modell = state.ki_modell();
+    blocking(move || {
+        let f = klausur_fach(&root, &index, &req.fach)?;
+        let (gewaehlt, nochmal, glossar) = with_index(&index, |idx| {
+            let q = klausur::quellen(idx, &f);
+            Ok((klausur::pruefe_anfrage(&req, &q)?, klausur::nochmal(idx, &f), klausur::glossar_alle(idx, &f)))
+        })?;
+        let gelesen = gewaehlt
+            .iter()
+            .map(|q| {
+                let c = write::read_for_edit(&root, &q.path, &RetryPolicy::short())?;
+                Ok(klausur::GeleseneQuelle { meta: c.meta, art: q.art, body: c.body })
+            })
+            .collect::<AppResult<Vec<_>>>()?;
+        let mut z = klausur::Zufall::aus_zeit();
+        if !req.mit_ki {
+            return klausur::quiz_erstellen(&f, &req, &gelesen, &nochmal, &glossar, None, &mut z);
+        }
+        let schluessel = ki::schluessel_laden()?.ok_or(AppError::KiKeinSchluessel)?;
+        let provider = ki::AnthropicProvider::new(schluessel, &modell)?;
+        let system = klausur::prompt_quiz(&config_dir);
+        let zugang = klausur::KiZugang { provider: &provider, system: &system, verlauf_dir: Some(&config_dir) };
+        klausur::quiz_erstellen(&f, &req, &gelesen, &nochmal, &glossar, Some(zugang), &mut z)
+    })
+    .await
+}
+
+/// Quizfragen (mit oder ohne KI) als **neues** Karteikarten-Set: ohne `relPath` nur Vorschau (Regel 9), mit dem Pfad
+/// aus der Vorschau wird angelegt – nie überschrieben. Fragen, die es schon als Karte gibt, bleiben weg.
+#[tauri::command]
+pub async fn klausur_karteikarten(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    req: KarteikartenAnfrage,
+) -> Result<KarteikartenSet, AppError> {
+    let root = state.root()?;
+    // auch für die Vorschau: der Dialog soll nichts versprechen, was das Anlegen ablehnt
+    ensure_write_allowed(&root)?;
+    let ziel = StatusZiel::von(&state, root);
+    let heute = jetzt().date();
+    blocking(move || {
+        let f = klausur_fach(&ziel.root, &ziel.index, &req.fach)?;
+        let sets = with_index(&ziel.index, |idx| {
+            klausur::pruefe_karten(idx, &req.fragen)?;
+            Ok(klausur::karteikarten_pfade(idx))
+        })?;
+        // schon vorhandene Karten (ein Quiz ohne KI fragt Karteikarten wörtlich ab) nicht doppelt anlegen
+        let (fragen, doppelt) = klausur::neue_karten(&klausur::vorhandene_karten(&ziel.root, &sets), &req.fragen);
+        if fragen.is_empty() {
+            return Err(AppError::InvalidInput(
+                "Alle Fragen gibt es schon als Karteikarten – es gibt nichts Neues zu speichern.".into(),
+            ));
+        }
+        let lernfeld = with_index(&ziel.index, |idx| Ok(klausur::gemeinsames_lernfeld(idx, &fragen)))?;
+        let rel = match &req.rel_path {
+            Some(p) => {
+                let name = p.strip_prefix(&format!("{}/", klausur::KARTEIKARTEN_ORDNER)).unwrap_or("");
+                if name.is_empty() || name.contains(['/', '\\']) || name.contains("..") || !name.to_lowercase().ends_with(".md") {
+                    return Err(AppError::InvalidInput(format!("„{p}“ ist kein Pfad für ein Karteikarten-Set.")));
+                }
+                p.clone()
+            }
+            None => klausur::freier_pfad(&ziel.root, &f.kurz, heute),
+        };
+        let titel = rel.rsplit('/').next().unwrap_or(&rel).trim_end_matches(".md").to_string();
+        let template = std::fs::read_to_string(ziel.root.join(klausur::KARTEIKARTEN_TEMPLATE)).ok();
+        let text = klausur::set_text(template.as_deref(), &f, lernfeld.as_deref(), &titel, &fragen);
+        let mut warnungen = Vec::new();
+        if doppelt > 0 {
+            warnungen.push(if doppelt == 1 {
+                "1 Frage gibt es schon als Karteikarte – sie bleibt weg.".to_string()
+            } else {
+                format!("{doppelt} Fragen gibt es schon als Karteikarten – sie bleiben weg.")
+            });
+        }
+        if template.is_none() {
+            warnungen.push(format!("Kein Template „{}“ – die App benutzt die eingebaute Form.", klausur::KARTEIKARTEN_TEMPLATE));
+        }
+        let karten = fragen.len();
+        if req.rel_path.is_none() {
+            return Ok(KarteikartenSet { rel_path: rel, text, karten, report: None, warnungen });
+        }
+        let _schreibsperre = ziel.lock.lock().unwrap_or_else(|e| e.into_inner());
+        let ordner_neu = !ziel.root.join(klausur::KARTEIKARTEN_ORDNER).is_dir();
+        match write::create_new(&ziel.root, &rel, &text, &RetryPolicy::write(), &ziel.writes)? {
+            write::CreateOutcome::Created(version) => {
+                index_own_write(&app, &ziel.index, &ziel.root, &rel);
+                let created_folders = if ordner_neu { vec![klausur::KARTEIKARTEN_ORDNER.to_string()] } else { vec![] };
+                let report = WriteReport { rel_path: rel.clone(), created: true, version, created_folders, warnungen: warnungen.clone() };
+                Ok(KarteikartenSet { rel_path: rel, text, karten, report: Some(report), warnungen })
+            }
+            write::CreateOutcome::Exists(p) => {
+                Err(AppError::InvalidInput(format!("„{p}“ gibt es inzwischen – bitte die Vorschau erneut öffnen.")))
+            }
+        }
+    })
+    .await
 }
 
 #[cfg(test)]

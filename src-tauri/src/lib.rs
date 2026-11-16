@@ -27,6 +27,7 @@ pub mod guard;
 pub mod heute;
 pub mod index;
 pub mod ki;
+pub mod klausur;
 pub mod logbuch;
 pub mod model;
 pub mod obsidian;
@@ -206,6 +207,10 @@ pub fn run() {
             commands::frage_klaeren,
             commands::fragen_einstellungen,
             commands::fragen_einstellungen_speichern,
+            commands::klausur_uebersicht,
+            commands::klausur_quellen,
+            commands::klausur_quiz,
+            commands::klausur_karteikarten,
         ])
         .run(tauri::generate_context!())
         .expect("Ausbildungs-Cockpit konnte nicht gestartet werden");

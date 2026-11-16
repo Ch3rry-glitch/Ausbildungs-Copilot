@@ -10,6 +10,7 @@ import { UnterrichtView, type EditorHandle } from "./components/UnterrichtView";
 import { LogbuchView, type LogbuchRequest } from "./components/LogbuchView";
 import { AufgabenView } from "./components/AufgabenView";
 import { FragenView } from "./components/FragenView";
+import { KlausurView } from "./components/KlausurView";
 import { CreateNoteDialog } from "./components/CreateNoteDialog";
 import { askUnsaved, isModalOpen } from "./components/Modal";
 import { ToastProvider, useToast } from "./toast";
@@ -37,6 +38,8 @@ function Cockpit() {
   // einen Abstecher in die Quellnotiz.
   const [aufgabenMounted, setAufgabenMounted] = useState(false);
   const [fragenMounted, setFragenMounted] = useState(false);
+  // Klausur-Trainer bleibt eingehängt: ein laufendes Quiz (nur im Speicher) überlebt den Abstecher in die Quelle
+  const [klausurMounted, setKlausurMounted] = useState(false);
   const [aufgabenUeberfaellig, setAufgabenUeberfaellig] = useState<number | null>(null);
   const [change, setChange] = useState<{ seq: number; data: VaultChanged } | null>(null);
   const [openRequest, setOpenRequest] = useState<{ path: string; line?: number; seq: number } | null>(null);
@@ -91,6 +94,7 @@ function Cockpit() {
       if (v === "logbuch") setLogbuchMounted(true);
       if (v === "aufgaben") setAufgabenMounted(true);
       if (v === "fragen") setFragenMounted(true);
+      if (v === "klausur") setKlausurMounted(true);
       setView(v);
     },
     [einstellungenVerlassenOk],
@@ -353,6 +357,16 @@ function Cockpit() {
               change={change}
               onOpenNote={openNote}
               dirtyPath={dirtyPath}
+              onGoSettings={() => void go("einstellungen")}
+            />
+          </div>
+        )}
+        {klausurMounted && (
+          <div className="view-host" hidden={view !== "klausur"}>
+            <KlausurView
+              active={view === "klausur"}
+              change={change}
+              onOpenNote={openNote}
               onGoSettings={() => void go("einstellungen")}
             />
           </div>
