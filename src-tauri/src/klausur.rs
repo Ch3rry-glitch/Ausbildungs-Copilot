@@ -410,7 +410,8 @@ pub fn quiz_ohne_ki(
     anzahl: usize,
     z: &mut Zufall,
 ) -> Vec<QuizFrage> {
-    let mut out = Vec::new();
+    let begriffe: Vec<String> = glossar_alle.iter().map(|(t, _, _)| beleg_norm(t)).filter(|t| !t.is_empty()).collect();
+    let mut out: Vec<(QuizFrage, Vec<String>)> = Vec::new();
     let mut dreh = 0usize;
     for q in quellen {
         let m = &q.meta;
@@ -451,19 +452,51 @@ pub fn quiz_ohne_ki(
                     FrageArt::Kurz => frage(art, format!("Erkläre kurz: {}", m.title), kurz.clone(), m, kurz.clone()),
                 };
                 optionen_mischen(&mut f, z);
-                out.push(f);
+                let mut th = themen(&f.frage, &begriffe);
+                th.push(beleg_norm(&m.title));
+                out.push((f, th));
                 continue;
             }
         };
         for (b, erlaubt) in bausteine {
             let Some(art) = waehle_art(erlaubt, arten, dreh) else { continue };
             dreh += 1;
-            out.push(frage(art, b.frage, b.antwort.clone(), m, b.antwort));
+            let th = themen(&b.frage, &begriffe);
+            out.push((frage(art, b.frage, b.antwort.clone(), m, b.antwort), th));
         }
     }
     z.mischen(&mut out);
-    out.truncate(anzahl);
-    out
+    themen_streuen(out, anzahl)
+}
+
+/// Glossarbegriffe (Vergleichsform), die in `text` am Wortanfang vorkommen – „Bezugspreises“
+/// zählt, „Listenbezugspreis“ nicht.
+fn themen(text: &str, begriffe: &[String]) -> Vec<String> {
+    let t = beleg_norm(text);
+    begriffe
+        .iter()
+        .filter(|b| t.match_indices(b.as_str()).any(|(i, _)| t[..i].chars().next_back().map_or(true, |c| !c.is_alphanumeric())))
+        .cloned()
+        .collect()
+}
+
+/// Nimmt die ersten `anzahl` Fragen der gemischten Liste, stellt aber Fragen zu einem schon
+/// gefragten Glossarbegriff hinten an: Sie kommen nur dran, wenn es sonst zu wenige Fragen gibt
+/// (Karteikarte „Was ist der Bezugspreis?“ und Glossar „Bezugspreis“ nicht im selben kurzen Quiz).
+fn themen_streuen(fragen: Vec<(QuizFrage, Vec<String>)>, anzahl: usize) -> Vec<QuizFrage> {
+    let mut gefragt: HashSet<String> = HashSet::new();
+    let (mut vorn, mut hinten) = (Vec::new(), Vec::new());
+    for (f, th) in fragen {
+        if th.iter().any(|t| gefragt.contains(t)) {
+            hinten.push(f);
+        } else {
+            gefragt.extend(th);
+            vorn.push(f);
+        }
+    }
+    vorn.extend(hinten);
+    vorn.truncate(anzahl);
+    vorn
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1225,6 +1258,48 @@ mod tests {
         }
         let nur_auswahl = quiz_ohne_ki(&gelesen, &glossar, &[FrageArt::Auswahl], 30, &mut Zufall::neu(2));
         assert!(nur_auswahl.iter().all(|x| x.art == FrageArt::Auswahl) && !nur_auswahl.is_empty());
+
+        // Klicktest 16.11.: „Was ist der Bezugspreis?“ (Karteikarte) und „Erkläre kurz: Bezugspreis“
+        // (Glossar) im selben 5er-Quiz. Ein Begriff kommt jetzt nur einmal dran, solange es genug
+        // andere Fragen gibt.
+        let begriffe: Vec<String> = glossar.iter().map(|(t, _, _)| beleg_norm(t)).collect();
+        let alle_themen = |x: &QuizFrage| {
+            let mut th = themen(&x.frage, &begriffe);
+            if x.quelle_pfad.starts_with("06 Glossar/") {
+                th.push(beleg_norm(&x.quelle_titel));
+            }
+            th.into_iter().collect::<HashSet<_>>()
+        };
+        assert!(fragen.iter().filter(|x| alle_themen(x).contains("bezugspreis")).count() >= 2, "Fixture braucht die Dopplung");
+        for seed in 0..40 {
+            let kurz = quiz_ohne_ki(&gelesen, &glossar, &ALLE, 5, &mut Zufall::neu(seed));
+            assert_eq!(kurz.len(), 5);
+            let mut gefragt = HashSet::new();
+            for x in &kurz {
+                for t in alle_themen(x) {
+                    assert!(gefragt.insert(t.clone()), "Seed {seed}: „{t}“ doppelt: {kurz:#?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn themen_am_wortanfang_und_dopplungen_hinten() {
+        let b = vec!["bezugspreis".to_string(), "handelsspanne".to_string()];
+        assert_eq!(themen("Wie berechnet man den **Bezugspreis**?", &b), vec!["bezugspreis"]);
+        assert_eq!(themen("Höhe des Bezugspreises", &b), vec!["bezugspreis"]);
+        assert!(themen("Was ist der Listenbezugspreis?", &b).is_empty());
+        let meta = crate::vault::scan::analyze("a.md", &crate::vault::frontmatter::NoteText::parse(""), 0, 0);
+        let f = |s: &str| frage(FrageArt::Kurz, s.into(), "a".into(), &meta, "a".into());
+        let liste = vec![
+            (f("1"), vec!["bezugspreis".to_string()]),
+            (f("2"), vec!["bezugspreis".to_string()]),
+            (f("3"), vec![]),
+            (f("4"), vec!["handelsspanne".to_string()]),
+        ];
+        let namen = |v: Vec<QuizFrage>| v.into_iter().map(|x| x.frage).collect::<Vec<_>>();
+        assert_eq!(namen(themen_streuen(liste.clone(), 3)), ["1", "3", "4"]);
+        assert_eq!(namen(themen_streuen(liste, 4)), ["1", "3", "4", "2"]);
     }
 
     #[test]
