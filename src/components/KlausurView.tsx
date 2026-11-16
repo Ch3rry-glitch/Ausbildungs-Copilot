@@ -580,6 +580,10 @@ function Ergebnis({
   const n = quiz.fragen.length;
   const prozent = n > 0 ? Math.round((richtig / n) * 100) : 0;
   const falsche = quiz.fragen.filter((_, i) => antworten[i]?.gewusst === false);
+  // Ohne KI: Fragen aus Karteikarten-Sets gibt es schon als Karte – speichern lohnt nur mit anderen Quellen
+  // (doppelte Karten lässt das Backend ohnehin weg).
+  const quellArt = new Map(quiz.quellen.map((q) => [q.path, q.art]));
+  const speicherbar = quiz.mitKi || quiz.fragen.some((f) => quellArt.get(f.quellePfad) !== "karteikarten");
   const lob = prozent >= 90 ? "Stark – das sitzt." : prozent >= 70 ? "Gut! Noch ein paar Lücken." : prozent >= 50 ? "Halb geschafft – wiederhole die falschen." : "Da geht noch was – schau dir die Quellen an.";
   return (
     <div className="kt-spiel-body">
@@ -602,7 +606,7 @@ function Ergebnis({
         <button className="btn" onClick={onNeu}>
           Neues Quiz
         </button>
-        {quiz.mitKi && (
+        {speicherbar && (
           <button className="btn" onClick={onSpeichern}>
             {Icon.karten} Als Karteikarten speichern …
           </button>

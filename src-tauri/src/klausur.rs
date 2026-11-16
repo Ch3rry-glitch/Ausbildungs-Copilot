@@ -634,6 +634,10 @@ pub fn pruefe_antwort(text: &str, notizen: &[KiNotiz], arten: &[FrageArt], anzah
     let normiert: Vec<(String, &KiNotiz)> = notizen.iter().map(|n| (beleg_norm(&n.text), n)).collect();
     let mut g = Geprueft::default();
     let mut gesehen = HashSet::new();
+    // Echttest 16.11.: drei Fragen zur selben Rechnung mit demselben Beleg – eine Stelle und eine
+    // Antwort zählen nur einmal, sonst prüft das Quiz denselben Sachverhalt mehrfach ab
+    let mut belege_gesehen: HashSet<String> = HashSet::new();
+    let mut antworten_gesehen: HashSet<String> = HashSet::new();
     for r in roh.fragen {
         let alle = [&r.frage, &r.antwort, &r.erklaerung, &r.beleg].into_iter().chain(r.optionen.iter());
         if alle.clone().any(|s| guard::contains_purchase_price(s)) {
@@ -681,8 +685,15 @@ pub fn pruefe_antwort(text: &str, notizen: &[KiNotiz], arten: &[FrageArt], anzah
             g.verworfen += 1;
             continue;
         }
+        let a = beleg_norm(&antwort).trim_end_matches(['.', '!', ' ']).to_string();
+        if belege_gesehen.contains(&b) || antworten_gesehen.contains(&a) {
+            g.verworfen += 1;
+            continue;
+        }
         let erklaerung = Some(saeubern(&r.erklaerung)).filter(|s| !s.is_empty());
         gesehen.insert(frage.to_lowercase());
+        belege_gesehen.insert(b);
+        antworten_gesehen.insert(a);
         g.fragen.push(QuizFrage {
             art,
             frage,
@@ -1028,6 +1039,34 @@ pub fn gemeinsames_lernfeld(idx: &VaultIndex, fragen: &[QuizFrage]) -> Option<St
     (werte.len() == 1).then(|| werte.into_keys().next()).flatten().filter(|s| !s.is_empty())
 }
 
+/// Alle Karteikarten-Sets des Vaults (für den Doppelt-Abgleich beim Speichern).
+pub fn karteikarten_pfade(idx: &VaultIndex) -> Vec<RelPath> {
+    idx.notes().filter(|m| quell_art(m) == Some(QuellArt::Karteikarten)).map(|m| m.path.clone()).collect()
+}
+
+/// Vergleichsformen aller Kartenfragen in diesen Sets. Nicht lesbare Dateien zählen nicht.
+pub fn vorhandene_karten(root: &Path, pfade: &[RelPath]) -> HashSet<String> {
+    pfade
+        .iter()
+        .filter_map(|p| crate::vault::scan::read_note(root, p).ok())
+        .flat_map(|(_, t)| karteikarten(t.body()))
+        .map(|b| beleg_norm(&b.frage))
+        .collect()
+}
+
+/// Teilt die Fragen in neue und schon vorhandene Karten. Ein Quiz ohne KI fragt Karteikarten
+/// wörtlich ab – die sollen beim Speichern nicht doppelt im Spaced-Repetition-Stapel landen.
+/// Gespeicherte Auswahlkarten tragen ihre Optionen in der Frage (`… a) … b) …`), die Optionen
+/// sind jedes Mal anders gemischt – verglichen wird deshalb nur der Fragetext davor.
+pub fn neue_karten(vorhanden: &HashSet<String>, fragen: &[QuizFrage]) -> (Vec<QuizFrage>, usize) {
+    let (neu, doppelt): (Vec<&QuizFrage>, Vec<&QuizFrage>) = fragen.iter().partition(|f| {
+        let k = beleg_norm(&f.frage);
+        let mit_optionen = format!("{k} a) ");
+        !(vorhanden.contains(&k) || (f.art == FrageArt::Auswahl && vorhanden.iter().any(|v| v.starts_with(&mit_optionen))))
+    });
+    (neu.into_iter().cloned().collect(), doppelt.len())
+}
+
 /// Fragen vor dem Speichern prüfen: Quelle bekannt und nicht privat, kein EK (Regel 6).
 pub fn pruefe_karten(idx: &VaultIndex, fragen: &[QuizFrage]) -> AppResult<()> {
     if fragen.is_empty() {
@@ -1112,6 +1151,28 @@ mod tests {
         let f = &g.fragen[0];
         assert_eq!(f.antwort, "B", "Antwort folgt der richtigen Option");
         assert_eq!(f.quelle_pfad, "03 Unterricht/GEC 05.10.2026.md");
+    }
+
+    #[test]
+    fn gleicher_beleg_oder_gleiche_antwort_nur_einmal() {
+        let fr = |art: &str, frage: &str, antwort: &str, beleg: &str| {
+            format!(
+                r#"{{"art":"{art}","frage":"{frage}","optionen":[],"richtig":-1,"antwort":"{antwort}","erklaerung":"","quelle":"GEC 05.10.2026","beleg":"{beleg}"}}"#
+            )
+        };
+        let skonto = "Skonto wird vom Zielverkaufspreis gerechnet";
+        let spanne = "Handelsspanne = (Listenverkaufspreis - Bezugspreis)";
+        let fragen = [
+            fr("kurz", "Wovon wird Skonto gerechnet?", "Vom Zielverkaufspreis", skonto),
+            fr("karte", "Skonto: Grundwert?", "Zielverkaufspreis", skonto),
+            fr("kurz", "Worauf bezieht sich der Skonto?", "vom Zielverkaufspreis.", spanne),
+            fr("kurz", "Wie berechnet man die Handelsspanne?", "Listenverkaufspreis minus Bezugspreis, geteilt durch den Listenverkaufspreis", spanne),
+        ];
+        let text = format!(r#"{{"fragen":[{}]}}"#, fragen.join(","));
+        let g = pruefe_antwort(&text, &[notiz()], &ALLE, 10).unwrap();
+        let titel: Vec<&str> = g.fragen.iter().map(|f| f.frage.as_str()).collect();
+        assert_eq!(titel, ["Wovon wird Skonto gerechnet?", "Wie berechnet man die Handelsspanne?"]);
+        assert_eq!(g.verworfen, 2, "gleicher Beleg + gleiche Antwort");
     }
 
     #[test]
@@ -1225,6 +1286,52 @@ mod tests {
         }
     }
 
+    fn lesen(root: &Path, q: &[QuizQuelle]) -> Vec<GeleseneQuelle> {
+        q.iter()
+            .map(|x| {
+                let (meta, text) = crate::vault::scan::read_note(root, &x.path).unwrap();
+                GeleseneQuelle { meta, art: x.art, body: text.body().to_string() }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn speichern_laesst_vorhandene_karten_weg() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../fixtures/vault");
+        let idx = VaultIndex::build(&root).unwrap();
+        let f = fach();
+        let gelesen = lesen(&root, &quellen(&idx, &f));
+        let fragen = quiz_ohne_ki(&gelesen, &glossar_alle(&idx, &f), &ALLE, 30, &mut Zufall::neu(3));
+        let vorhanden = vorhanden_karten_fixture(&root, &idx);
+        assert!(vorhanden.contains(&beleg_norm("Was ist der Bezugspreis?")), "{vorhanden:?}");
+        // Quiz ohne KI: Fragen aus dem Karteikarten-Set sind schon Karten, Glossar & Co. nicht
+        let aus_sets = fragen.iter().filter(|x| x.quelle_pfad.starts_with(KARTEIKARTEN_ORDNER)).count();
+        let (neu, doppelt) = neue_karten(&vorhanden, &fragen);
+        assert!(aus_sets > 0 && !neu.is_empty());
+        assert_eq!(doppelt, aus_sets);
+        assert!(neu.iter().all(|x| !x.quelle_pfad.starts_with(KARTEIKARTEN_ORDNER)), "{neu:#?}");
+        assert!(neu.iter().any(|x| x.art == FrageArt::Auswahl), "Auswahl-Rundweg braucht eine Auswahlfrage");
+        // gespeichertes Set wieder einlesen: dieselben Fragen gelten jetzt als vorhanden – auch
+        // Auswahlfragen, deren Optionen beim nächsten Quiz anders gemischt sind
+        let text = set_text(None, &f, None, "Quiz GEC 16.11.2026", &neu);
+        let mut nachher = vorhanden.clone();
+        nachher.extend(karteikarten(&text).into_iter().map(|b| beleg_norm(&b.frage)));
+        let mut wieder = neu.clone();
+        let mut z = Zufall::neu(9);
+        for x in &mut wieder {
+            optionen_mischen(x, &mut z);
+        }
+        let (nochmal, doppelt2) = neue_karten(&nachher, &wieder);
+        assert!(nochmal.is_empty(), "{nochmal:#?}");
+        assert_eq!(doppelt2, neu.len());
+    }
+
+    fn vorhanden_karten_fixture(root: &Path, idx: &VaultIndex) -> HashSet<String> {
+        let pfade = karteikarten_pfade(idx);
+        assert!(pfade.iter().all(|p| p.starts_with(KARTEIKARTEN_ORDNER)) && !pfade.is_empty(), "{pfade:?}");
+        vorhandene_karten(root, &pfade)
+    }
+
     #[test]
     fn testvault_quellen_und_quiz_ohne_ki() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../fixtures/vault");
@@ -1237,13 +1344,7 @@ mod tests {
         }
         assert!(!q.iter().any(|x| x.path.contains("Templates") || x.title == "Karteikarten"), "{q:?}");
         assert!(!nochmal(&idx, &f).is_empty(), "#nochmal des Fachs");
-        let gelesen: Vec<GeleseneQuelle> = q
-            .iter()
-            .map(|x| {
-                let (meta, text) = crate::vault::scan::read_note(&root, &x.path).unwrap();
-                GeleseneQuelle { meta, art: x.art, body: text.body().to_string() }
-            })
-            .collect();
+        let gelesen = lesen(&root, &q);
         let glossar = glossar_alle(&idx, &f);
         let fragen = quiz_ohne_ki(&gelesen, &glossar, &ALLE, 30, &mut Zufall::neu(1));
         assert!(fragen.len() >= 8, "{fragen:#?}");

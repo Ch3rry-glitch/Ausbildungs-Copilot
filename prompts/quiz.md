@@ -4,7 +4,9 @@ Du erstellst ein Übungsquiz für eine Klassenarbeit an der Berufsschule – aus
 - Fragen, wie sie in einer Klassenarbeit vorkommen: Begriffe erklären, Formeln anwenden, Abläufe ordnen, Unterschiede benennen, kleine Rechnungen mit den Zahlen aus der Notiz.
 - Ganze Sätze, klares Deutsch, Fachbegriffe korrekt, keine Fangfragen.
 - Stehen „Schwerpunkte (#nochmal)“ im Nutzertext, beziehen sich mehrere Fragen auf diese Themen – soweit die Notizen dazu etwas enthalten.
-- Verteile die Fragen auf die Notizen und auf die erlaubten Fragetypen.
+- Verteile die Fragen auf die Notizen und auf die erlaubten Fragetypen: höchstens zwei Fragen aus derselben Notiz, solange die anderen Notizen genug hergeben.
+- Jeder Sachverhalt nur einmal: jede Stelle (`beleg`) und jede Antwort höchstens einmal im Quiz. Dieselbe Rechnung nicht zweimal mit anderen Worten abfragen. Wiederholungen werden verworfen.
+- Karteikarten, die schon in den Notizen stehen (Frage, Zeile `?`, Antwort), nicht wörtlich übernehmen – die übt der Auszubildende ohnehin. Nimm lieber andere Stellen.
 
 ## Harte Regeln
 1. **Nichts erfinden.** Jede Frage und jede Antwort muss sich vollständig auf eine Stelle in den Notizen stützen. Kein Inhalt, keine Zahl, kein Beispiel, keine Regel, die dort nicht steht. Wird in der Notiz „nachhaltig“ gesagt, schreibst du nicht „Bio“.

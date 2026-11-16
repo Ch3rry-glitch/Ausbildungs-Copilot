@@ -858,8 +858,8 @@ pub async fn klausur_quiz(state: State<'_, AppState>, req: QuizAnfrage) -> Resul
     .await
 }
 
-/// KI-Fragen als **neues** Karteikarten-Set: ohne `relPath` nur Vorschau (Regel 9), mit dem Pfad
-/// aus der Vorschau wird angelegt – nie überschrieben.
+/// Quizfragen (mit oder ohne KI) als **neues** Karteikarten-Set: ohne `relPath` nur Vorschau (Regel 9), mit dem Pfad
+/// aus der Vorschau wird angelegt – nie überschrieben. Fragen, die es schon als Karte gibt, bleiben weg.
 #[tauri::command]
 pub async fn klausur_karteikarten(
     app: AppHandle,
@@ -873,10 +873,18 @@ pub async fn klausur_karteikarten(
     let heute = jetzt().date();
     blocking(move || {
         let f = klausur_fach(&ziel.root, &ziel.index, &req.fach)?;
-        let lernfeld = with_index(&ziel.index, |idx| {
+        let sets = with_index(&ziel.index, |idx| {
             klausur::pruefe_karten(idx, &req.fragen)?;
-            Ok(klausur::gemeinsames_lernfeld(idx, &req.fragen))
+            Ok(klausur::karteikarten_pfade(idx))
         })?;
+        // schon vorhandene Karten (ein Quiz ohne KI fragt Karteikarten wörtlich ab) nicht doppelt anlegen
+        let (fragen, doppelt) = klausur::neue_karten(&klausur::vorhandene_karten(&ziel.root, &sets), &req.fragen);
+        if fragen.is_empty() {
+            return Err(AppError::InvalidInput(
+                "Alle Fragen gibt es schon als Karteikarten – es gibt nichts Neues zu speichern.".into(),
+            ));
+        }
+        let lernfeld = with_index(&ziel.index, |idx| Ok(klausur::gemeinsames_lernfeld(idx, &fragen)))?;
         let rel = match &req.rel_path {
             Some(p) => {
                 let name = p.strip_prefix(&format!("{}/", klausur::KARTEIKARTEN_ORDNER)).unwrap_or("");
@@ -889,12 +897,19 @@ pub async fn klausur_karteikarten(
         };
         let titel = rel.rsplit('/').next().unwrap_or(&rel).trim_end_matches(".md").to_string();
         let template = std::fs::read_to_string(ziel.root.join(klausur::KARTEIKARTEN_TEMPLATE)).ok();
-        let text = klausur::set_text(template.as_deref(), &f, lernfeld.as_deref(), &titel, &req.fragen);
+        let text = klausur::set_text(template.as_deref(), &f, lernfeld.as_deref(), &titel, &fragen);
         let mut warnungen = Vec::new();
+        if doppelt > 0 {
+            warnungen.push(if doppelt == 1 {
+                "1 Frage gibt es schon als Karteikarte – sie bleibt weg.".to_string()
+            } else {
+                format!("{doppelt} Fragen gibt es schon als Karteikarten – sie bleiben weg.")
+            });
+        }
         if template.is_none() {
             warnungen.push(format!("Kein Template „{}“ – die App benutzt die eingebaute Form.", klausur::KARTEIKARTEN_TEMPLATE));
         }
-        let karten = req.fragen.len();
+        let karten = fragen.len();
         if req.rel_path.is_none() {
             return Ok(KarteikartenSet { rel_path: rel, text, karten, report: None, warnungen });
         }

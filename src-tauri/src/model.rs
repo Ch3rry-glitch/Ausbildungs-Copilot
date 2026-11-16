@@ -1078,7 +1078,7 @@ pub struct Quiz {
     pub warnungen: Vec<String>,
 }
 
-/// KI-Fragen als Karteikarten-Set speichern. Ohne `rel_path`: nur Vorschau (Regel 9).
+/// Quizfragen (mit oder ohne KI) als Karteikarten-Set speichern. Ohne `rel_path`: nur Vorschau (Regel 9).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct KarteikartenAnfrage {
