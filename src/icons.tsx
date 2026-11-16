@@ -44,4 +44,6 @@ export const Icon: Record<string, ReactElement> = {
   // Klausur-Trainer
   klausur: p(["M12 3l9 4.5l-9 4.5l-9-4.5z", "M6 9.5v4.5c0 1.7 2.7 3 6 3s6-1.3 6-3V9.5", "M21 7.5v5"]),
   karten: p(["M4 6a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z", "M17 7l2.5.6a2 2 0 0 1 1.5 2.4l-2.2 9"]),
+  // Updates
+  update: p(["M12 3v12", "M7 10l5 5l5-5", "M5 21h14"]),
 };

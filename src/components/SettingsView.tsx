@@ -11,6 +11,8 @@ import {
   type LogbuchFach,
 } from "../api";
 import { Icon } from "../icons";
+import { installieren, updateApi, useUpdate, vonHandPruefen, zeitpunkt, type UpdateStatus } from "../update";
+import { UpdateBalken } from "./UpdateHinweis";
 
 export function SettingsView({
   status,
@@ -95,6 +97,7 @@ export function SettingsView({
         <LogbuchEinstellungen key={status.vaultPath ?? ""} onDirty={onLogbuchDirty} />
         <FragenEinstellungenKarte />
         <KiEinstellungen />
+        <UpdateEinstellungen />
       </div>
     </>
   );
@@ -705,6 +708,91 @@ function KiEinstellungen() {
       )}
 
       {msg && <div className={msg.ok ? "result" : "error"}>{msg.text}</div>}
+    </section>
+  );
+}
+
+// ---------- Updates ----------
+
+function UpdateEinstellungen() {
+  const u = useUpdate();
+  const [st, setSt] = useState<UpdateStatus | null>(null);
+  const [ladeFehler, setLadeFehler] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    updateApi
+      .status()
+      .then((s) => alive && setSt(s))
+      .catch((e) => alive && setLadeFehler(errorText(e)));
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const verfuegbar = u.verfuegbar ?? st?.verfuegbar ?? null;
+  const letzte = u.letztePruefung ?? st?.letztePruefung ?? null;
+  const busy = u.phase !== "ruhe";
+
+  return (
+    <section className="settings glass">
+      <div>
+        <div className="settings-title-row">
+          <h2>Updates</h2>
+          {st &&
+            (!st.eingerichtet ? (
+              <span className="badge amber">Nicht eingerichtet</span>
+            ) : verfuegbar ? (
+              <span className="badge mint">{Icon.update} Version {verfuegbar.version} verfügbar</span>
+            ) : u.aktuell ? (
+              <span className="badge mint">{Icon.check} Aktuell</span>
+            ) : null)}
+        </div>
+        <div className="hint">
+          Die App sieht beim Start höchstens einmal am Tag auf GitHub nach, ob es eine neue Version gibt – ohne Internet
+          einfach nicht. Abgefragt wird nur die Versionsdatei; aus deinem Vault wird nichts gesendet. Installiert wird nur
+          auf deinen Klick und nur ein Update mit gültiger Signatur.
+          {st && !st.automatisch && " Im Entwicklungs-Build wird nie von selbst gesucht."}
+        </div>
+      </div>
+
+      <dl className="kv">
+        <dt>Installierte Version</dt>
+        <dd>{st?.version ?? "…"}</dd>
+        <dt>Zuletzt gesucht</dt>
+        <dd>{zeitpunkt(letzte)}</dd>
+      </dl>
+
+      <div className="row">
+        <button className="btn" onClick={() => void vonHandPruefen()} disabled={busy || !st}>
+          {Icon.refresh} {u.phase === "sucht" ? "Sucht …" : "Nach Updates suchen"}
+        </button>
+        {verfuegbar && (
+          <button className="btn mint" onClick={() => void installieren()} disabled={busy}>
+            {Icon.update} Jetzt aktualisieren
+          </button>
+        )}
+      </div>
+
+      {u.phase === "laedt" && (
+        <div className="update-laedt">
+          <div className="hint">
+            {u.prozent === 100
+              ? "Wird installiert – die App schließt sich und startet gleich neu."
+              : `Version ${verfuegbar?.version ?? ""} wird heruntergeladen …${u.prozent != null ? ` ${u.prozent} %` : ""}`}
+          </div>
+          <UpdateBalken prozent={u.prozent} />
+        </div>
+      )}
+      {verfuegbar && u.phase !== "laedt" && (
+        <div className="result">
+          Neue Version {verfuegbar.version} verfügbar{verfuegbar.datum ? ` (veröffentlicht am ${zeitpunkt(verfuegbar.datum)})` : ""}. Beim
+          Aktualisieren schließt sich die App kurz und startet danach von selbst neu.
+          {verfuegbar.notizen && <div className="update-notizen">{verfuegbar.notizen}</div>}
+        </div>
+      )}
+      {u.aktuell && !verfuegbar && <div className="result">Du hast die neueste Version ({st?.version}).</div>}
+      {(u.fehler || ladeFehler) && <div className="error">{u.fehler ?? ladeFehler}</div>}
     </section>
   );
 }

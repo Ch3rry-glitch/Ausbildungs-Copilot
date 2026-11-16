@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { AppStatus } from "../api";
 import { Icon } from "../icons";
 
@@ -25,6 +26,7 @@ export function Sidebar({
   editorDirty,
   logbuchOffen,
   aufgabenUeberfaellig,
+  children,
 }: {
   view: View;
   onView: (v: View) => void;
@@ -34,6 +36,8 @@ export function Sidebar({
   logbuchOffen: number | null;
   /** Zahl überfälliger Arbeitsaufträge; null = keine Anzeige */
   aufgabenUeberfaellig: number | null;
+  /** Platz über dem Fuß (Update-Hinweis) */
+  children?: ReactNode;
 }) {
   return (
     <aside className="sidebar glass">
@@ -89,6 +93,8 @@ export function Sidebar({
         {Icon.einstellungen}
         Einstellungen
       </button>
+
+      {children}
 
       <div className="sidebar-foot">
         Vault

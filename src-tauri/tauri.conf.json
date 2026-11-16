@@ -30,6 +30,7 @@
   "bundle": {
     "active": true,
     "targets": ["nsis"],
+    "createUpdaterArtifacts": true,
     "category": "Education",
     "shortDescription": "Ausbildungs-Cockpit für den Obsidian-Lernvault",
     "longDescription": "Zweite, schnellere Oberfläche auf den Obsidian-Lernvault: Unterrichtsnotizen, Aufgaben, Berichtsheft und Logbucheinträge für Moodle.",
@@ -46,6 +47,16 @@
         "installMode": "currentUser",
         "languages": ["German"],
         "displayLanguageSelector": false
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "PLATZHALTER: hier den öffentlichen Update-Schlüssel eintragen (Inhalt der .key.pub-Datei, siehe README → Updates)",
+      "endpoints": ["https://github.com/Ch3rry-glitch/Ausbildungs-Copilot/releases/latest/download/latest.json"],
+      "requireSignedVersion": true,
+      "windows": {
+        "installMode": "passive"
       }
     }
   }
