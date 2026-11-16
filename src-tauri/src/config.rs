@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::darstellung::Darstellung;
 use crate::error::{AppError, AppResult};
 use crate::model::{FragenEinstellungen, LogbuchFach};
 
@@ -30,6 +31,9 @@ pub struct AppConfig {
     /// M3: was „geklärt“ mit einer `#frage`-Zeile macht (Standard: Tag durchstreichen)
     #[serde(default)]
     pub fragen: FragenEinstellungen,
+    /// Farbthema und Glasstufe der Oberfläche; fehlt oder unbekannt → bisheriges Aussehen
+    #[serde(default, deserialize_with = "crate::darstellung::nachsichtig")]
+    pub darstellung: Darstellung,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

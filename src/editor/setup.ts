@@ -29,8 +29,8 @@ const cockpitTheme = EditorView.theme(
     ".cm-line": { padding: "0 26px" },
     ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--purple-2)", borderLeftWidth: "2px" },
     "&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection":
-      { backgroundColor: "rgba(139, 92, 246, 0.45)" },
-    ".cm-activeLine": { backgroundColor: "rgba(255, 255, 255, 0.04)" },
+      { backgroundColor: "rgba(var(--accent-rgb), 0.45)" },
+    ".cm-activeLine": { backgroundColor: "rgba(var(--hell-rgb), 0.04)" },
     ".cm-gutters": {
       backgroundColor: "transparent",
       color: "var(--text-3)",
@@ -44,10 +44,10 @@ const cockpitTheme = EditorView.theme(
     ".cm-panels.cm-panels-top": { borderBottom: "1px solid var(--glass-border)" },
     ".cm-panels.cm-panels-bottom": { borderTop: "1px solid var(--glass-border)" },
     ".cm-searchMatch": {
-      backgroundColor: "rgba(94, 234, 212, 0.18)",
-      outline: "1px solid rgba(94, 234, 212, 0.45)",
+      backgroundColor: "rgba(var(--hi-rgb), 0.18)",
+      outline: "1px solid rgba(var(--hi-rgb), 0.45)",
     },
-    ".cm-searchMatch.cm-searchMatch-selected": { backgroundColor: "rgba(94, 234, 212, 0.35)" },
+    ".cm-searchMatch.cm-searchMatch-selected": { backgroundColor: "rgba(var(--hi-rgb), 0.35)" },
   },
   { dark: true },
 );
@@ -59,7 +59,7 @@ const cockpitHighlight = HighlightStyle.define([
   { tag: t.strong, fontWeight: "700" },
   { tag: t.strikethrough, textDecoration: "line-through" },
   { tag: [t.link, t.url], color: "var(--purple-2)" },
-  { tag: t.monospace, color: "var(--mint)" },
+  { tag: t.monospace, color: "var(--hi)" },
   { tag: [t.meta, t.processingInstruction, t.contentSeparator], color: "var(--text-3)" },
   { tag: t.quote, color: "var(--text-2)" },
 ]);

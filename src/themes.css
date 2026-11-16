@@ -1,0 +1,168 @@
+/* Farbthemen und Glasstufen (Einstellungen → Darstellung).
+   Gewählt über <html data-theme="…" data-glas="…"> (src/theme.ts). Sie setzen nur Grundwerte
+   aus styles.css (oben); alle übrigen Farben leiten sich daraus ab. Alle Themen sind dunkel.
+   Jede Regel setzt ihren vollständigen Satz an Werten, damit eine Vorschau-Kachel mit eigenem
+   data-theme/data-glas nichts vom gerade gewählten Thema erbt.
+   Rot, Bernstein, Mint und Lila bleiben in allen Themen gleich: sie tragen Bedeutung
+   (überfällig, offen, erledigt/richtig, kopiert). */
+
+/* ---------- Farbthemen ---------- */
+/* „Violett“ ist die Voreinstellung und steht in styles.css (:root, [data-theme="violett"]). */
+
+[data-theme="ozean"] {
+  --bg-0-rgb: 3, 9, 24;           /* #030918 */
+  --bg-1-rgb: 6, 22, 48;          /* #061630 – Fensterfarbe */
+  --bg-2-rgb: 10, 45, 94;         /* #0a2d5e */
+  --surface-rgb: 13, 37, 74;
+  --accent-rgb: 59, 130, 246;     /* #3b82f6 */
+  --accent-2-rgb: 96, 165, 250;   /* #60a5fa */
+  --accent-deep-rgb: 30, 64, 175; /* #1e40af */
+  --on-accent: #fff;
+  --hi-rgb: 94, 234, 212;         /* Mint */
+  --text: #eff6ff;
+  --text-rgb: 224, 236, 255;
+  --shadow-rgb: 0, 4, 16;
+  --glow-a1: 0.32;
+  --glow-a2: 0.55;
+  --glow-a3: 0.14;
+}
+
+[data-theme="wald"] {
+  --bg-0-rgb: 3, 15, 11;          /* #030f0b */
+  --bg-1-rgb: 6, 31, 24;          /* #061f18 – Fensterfarbe */
+  --bg-2-rgb: 10, 62, 46;         /* #0a3e2e */
+  --surface-rgb: 12, 46, 35;
+  --accent-rgb: 16, 185, 129;     /* #10b981 */
+  --accent-2-rgb: 52, 211, 153;   /* #34d399 */
+  --accent-deep-rgb: 6, 95, 70;   /* #065f46 */
+  --on-accent: #022c22;           /* helles Grün trägt dunkle Schrift */
+  --hi-rgb: 190, 242, 100;        /* #bef264 – Limette, hebt sich vom Grün ab */
+  --text: #effdf6;
+  --text-rgb: 226, 248, 238;
+  --shadow-rgb: 0, 10, 6;
+  --glow-a1: 0.22;
+  --glow-a2: 0.55;
+  --glow-a3: 0.1;
+}
+
+[data-theme="rose"] {
+  --bg-0-rgb: 20, 5, 15;          /* #14050f */
+  --bg-1-rgb: 36, 10, 28;         /* #240a1c – Fensterfarbe */
+  --bg-2-rgb: 80, 18, 56;         /* #501238 */
+  --surface-rgb: 54, 17, 42;
+  --accent-rgb: 219, 39, 119;     /* #db2777 */
+  --accent-2-rgb: 244, 114, 182;  /* #f472b6 */
+  --accent-deep-rgb: 131, 24, 67; /* #831843 */
+  --on-accent: #fff;
+  --hi-rgb: 94, 234, 212;         /* Mint */
+  --text: #fff1f7;
+  --text-rgb: 255, 228, 240;
+  --shadow-rgb: 16, 0, 8;
+  --glow-a1: 0.38;
+  --glow-a2: 0.55;
+  --glow-a3: 0.12;
+}
+
+[data-theme="graphit"] {
+  --bg-0-rgb: 10, 10, 12;         /* #0a0a0c */
+  --bg-1-rgb: 22, 23, 27;         /* #16171b – Fensterfarbe */
+  --bg-2-rgb: 42, 44, 52;         /* #2a2c34 */
+  --surface-rgb: 33, 34, 40;
+  --accent-rgb: 100, 116, 139;    /* #64748b */
+  --accent-2-rgb: 148, 163, 184;  /* #94a3b8 */
+  --accent-deep-rgb: 51, 65, 85;  /* #334155 */
+  --on-accent: #fff;
+  --hi-rgb: 94, 234, 212;         /* Mint – einzige Buntfarbe neben den Bedeutungsfarben */
+  --text: #f4f4f5;
+  --text-rgb: 228, 228, 234;
+  --shadow-rgb: 0, 0, 0;
+  --glow-a1: 0.3;
+  --glow-a2: 0.45;
+  --glow-a3: 0.08;
+}
+
+/* ---------- Glasstufen ---------- */
+/* „Mittel“ ist die Voreinstellung und steht in styles.css (:root, [data-glas="mittel"]). */
+
+/* Klar: weniger Milchglas, der Hintergrund scheint stärker durch */
+[data-glas="klar"] {
+  --glass-top-rgb: var(--hell-rgb);
+  --glass-bottom-rgb: var(--hell-rgb);
+  --glass-a1: 0.025;
+  --glass-a2: 0;
+  --glass-inset-a: 0.05;
+  --glass-border-a: 0.12;
+  --glass-border-strong-a: 0.2;
+  --blur: blur(6px) saturate(120%);
+  --text-2-a: 0.74;
+  --text-3-a: 0.5;
+}
+
+/* Satt: fast deckende Karten im Farbton des Themas, ohne Weichzeichner (auch schneller),
+   dazu kräftigere Nebenschrift – am besten lesbar */
+[data-glas="satt"] {
+  --glass-top-rgb: var(--surface-rgb);
+  --glass-bottom-rgb: var(--bg-1-rgb);
+  --glass-a1: 0.97;
+  --glass-a2: 0.97;
+  --glass-inset-a: 0.07;
+  --glass-border-a: 0.12;
+  --glass-border-strong-a: 0.24;
+  --blur: none;
+  --text-2-a: 0.8;
+  --text-3-a: 0.62;
+}
+
+/* ---------- Einstellungen → Darstellung: Kacheln mit Live-Vorschau ---------- */
+.dz-gruppe { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
+.dz-kachel {
+  position: relative; display: flex; flex-direction: column; gap: 6px; padding: 7px 7px 10px;
+  border-radius: var(--radius); border: 1px solid var(--glass-border); background: rgba(var(--inset-rgb), 0.14);
+  cursor: pointer; transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+.dz-kachel:hover { border-color: var(--glass-border-strong); background: var(--glass); }
+.dz-kachel.aktiv {
+  border-color: rgba(var(--accent-2-rgb), 0.75);
+  box-shadow: 0 0 0 1px rgba(var(--accent-2-rgb), 0.45), 0 6px 22px rgba(var(--accent-rgb), 0.28);
+}
+.dz-kachel:has(.dz-radio:focus-visible) { outline: 2px solid var(--purple-2); outline-offset: 2px; }
+/* echtes Radio für Tastatur (Pfeiltasten) und Bildschirmleser, unsichtbar */
+.dz-radio { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; pointer-events: none; }
+.dz-name { display: flex; align-items: center; gap: 6px; padding: 0 3px; font-weight: 600; font-size: 13px; color: var(--text); }
+.dz-name svg { width: 14px; height: 14px; margin-left: auto; color: var(--purple-2); }
+.dz-hint { padding: 0 3px; font-size: 11.5px; line-height: 1.35; color: var(--text-3); }
+
+/* Mini-Cockpit. Die Leuchten sind relativ zur Kachel so groß wie im Fenster (1100 px von 1360 px …). */
+.dz-vorschau {
+  display: grid; grid-template-columns: 27% 1fr; gap: 6px; height: 94px; padding: 7px;
+  border-radius: 12px; overflow: hidden; color: var(--text); pointer-events: none;
+  background:
+    radial-gradient(81% 81% at 12% -10%, rgba(var(--accent-rgb), var(--glow-a1)), transparent 60%),
+    radial-gradient(66% 70% at 105% 20%, rgba(var(--accent-deep-rgb), var(--glow-a2)), transparent 60%),
+    radial-gradient(51% 58% at 60% 120%, rgba(var(--hi-rgb), var(--glow-a3)), transparent 60%),
+    linear-gradient(160deg, var(--bg-2) 0%, var(--bg-1) 45%, var(--bg-0) 100%);
+}
+.dz-seite, .dz-karte {
+  background: var(--glass-bg); border: 1px solid var(--glass-border); border-radius: 8px;
+  box-shadow: inset 0 1px 0 rgba(var(--hell-rgb), var(--glass-inset-a));
+  backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+}
+.dz-seite { display: flex; flex-direction: column; gap: 5px; padding: 7px 5px; }
+.dz-seite i { display: block; height: 6px; border-radius: 3px; background: rgba(var(--text-rgb), 0.2); }
+.dz-seite i.aktiv { background: linear-gradient(120deg, rgba(var(--accent-rgb), 0.95), rgba(var(--accent-rgb), 0.4)); }
+.dz-karte { display: flex; flex-direction: column; gap: 2px; padding: 6px 8px; min-width: 0; }
+.dz-titel { font-family: var(--font-display); font-size: 12.5px; font-weight: 750; line-height: 1.15; }
+.dz-zeile { font-size: 10px; line-height: 1.3; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dz-zeile.leise { color: var(--text-3); }
+.dz-zeile b { color: var(--purple-2); font-weight: 600; }
+.dz-fuss { margin-top: auto; display: flex; align-items: flex-end; justify-content: space-between; gap: 6px; }
+.dz-knopf {
+  padding: 1px 8px; border-radius: 99px; font-size: 9.5px; font-weight: 700; line-height: 1.5;
+  color: var(--on-accent); background: linear-gradient(135deg, var(--purple-2), var(--purple));
+}
+.dz-balken { display: flex; align-items: flex-end; gap: 2px; height: 18px; }
+.dz-balken i { width: 4px; border-radius: 2px; background: rgba(var(--accent-2-rgb), 0.55); }
+.dz-balken i:nth-child(1) { height: 45%; }
+.dz-balken i:nth-child(2) { height: 75%; }
+.dz-balken i:nth-child(3) { height: 55%; }
+.dz-balken i.hi { height: 100%; background: var(--hi); box-shadow: 0 0 6px rgba(var(--hi-rgb), 0.6); }
