@@ -11,6 +11,7 @@ import {
   type LogbuchFach,
 } from "../api";
 import { Icon } from "../icons";
+import { DarstellungEinstellungen } from "./DarstellungEinstellungen";
 
 export function SettingsView({
   status,
@@ -90,6 +91,8 @@ export function SettingsView({
             </dl>
           </div>
         </section>
+
+        <DarstellungEinstellungen />
 
         {/* neu laden, wenn der Vault wechselt (Fächer kommen aus Stundenplan und „01 Fächer“) */}
         <LogbuchEinstellungen key={status.vaultPath ?? ""} onDirty={onLogbuchDirty} />

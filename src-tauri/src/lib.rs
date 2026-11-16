@@ -12,6 +12,7 @@
 //! * [`starter`] – leerer Starter-Vault für Mitschüler
 //! * [`obsidian`] – `obsidian://`-Links
 //! * [`config`]  – Einstellungen in `%APPDATA%\ausbildungs-cockpit`
+//! * [`darstellung`] – Farbthema und Glasstufe der Oberfläche (in der Konfiguration, nie im Vault)
 //! * [`logbuch`] – Logbucheinträge für Moodle: Entwurf, Text, Status (nur `logbuch:` im Vault)
 //! * [`ki`]      – KI hinter `LlmProvider` (Anthropic), Schlüssel im Anmeldeinformationsspeicher
 //! * [`aufgaben`] – Arbeitsaufträge und Lernaufgaben wie `00 Start/Aufgaben.md`, Abhaken, gelöst
@@ -21,6 +22,7 @@
 pub mod aufgaben;
 pub mod commands;
 pub mod config;
+pub mod darstellung;
 pub mod error;
 pub mod fragen;
 pub mod guard;
@@ -165,6 +167,8 @@ pub fn run() {
                     }
                 }
             }
+            let farbe = state.config.lock().unwrap().darstellung.farbe;
+            darstellung::fensterfarbe_setzen(app.handle(), farbe);
             if let Some(root) = configured.or_else(dev_fixture_vault) {
                 if let Err(e) = state.open_vault(app.handle(), strip_verbatim(root)) {
                     eprintln!("[vault] {e}");
@@ -211,6 +215,8 @@ pub fn run() {
             commands::klausur_quellen,
             commands::klausur_quiz,
             commands::klausur_karteikarten,
+            darstellung::darstellung,
+            darstellung::darstellung_speichern,
         ])
         .run(tauri::generate_context!())
         .expect("Ausbildungs-Cockpit konnte nicht gestartet werden");
