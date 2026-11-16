@@ -10,6 +10,7 @@ import { UnterrichtView, type EditorHandle } from "./components/UnterrichtView";
 import { LogbuchView, type LogbuchRequest } from "./components/LogbuchView";
 import { AufgabenView } from "./components/AufgabenView";
 import { FragenView } from "./components/FragenView";
+import { BerichtsheftView } from "./components/BerichtsheftView";
 import { CreateNoteDialog } from "./components/CreateNoteDialog";
 import { askUnsaved, isModalOpen } from "./components/Modal";
 import { ToastProvider, useToast } from "./toast";
@@ -37,6 +38,9 @@ function Cockpit() {
   // einen Abstecher in die Quellnotiz.
   const [aufgabenMounted, setAufgabenMounted] = useState(false);
   const [fragenMounted, setFragenMounted] = useState(false);
+  // Berichtsheft bleibt eingehängt: Entwürfe (Nachweis, Lernfelder, Betrieb.md) überleben „Im Editor öffnen“.
+  const [berichtsheftMounted, setBerichtsheftMounted] = useState(false);
+  const [berichtsheftOffen, setBerichtsheftOffen] = useState<number | null>(null);
   const [aufgabenUeberfaellig, setAufgabenUeberfaellig] = useState<number | null>(null);
   const [change, setChange] = useState<{ seq: number; data: VaultChanged } | null>(null);
   const [openRequest, setOpenRequest] = useState<{ path: string; line?: number; seq: number } | null>(null);
@@ -91,6 +95,7 @@ function Cockpit() {
       if (v === "logbuch") setLogbuchMounted(true);
       if (v === "aufgaben") setAufgabenMounted(true);
       if (v === "fragen") setFragenMounted(true);
+      if (v === "berichtsheft") setBerichtsheftMounted(true);
       setView(v);
     },
     [einstellungenVerlassenOk],
@@ -133,6 +138,19 @@ function Cockpit() {
     }
   }, []);
 
+  // Vorwochen mit Offenem für die Seitenleiste (Fehler → keine Anzeige)
+  const berichtsheftSeq = useRef(0);
+  const refreshBerichtsheftOffen = useCallback(async () => {
+    berichtsheftSeq.current += 1;
+    const mine = berichtsheftSeq.current;
+    try {
+      const u = await api.berichtsheftUebersicht(null);
+      if (mine === berichtsheftSeq.current) setBerichtsheftOffen(u.offenVorwochen);
+    } catch {
+      if (mine === berichtsheftSeq.current) setBerichtsheftOffen(null);
+    }
+  }, []);
+
   const openNote = useCallback(
     async (path: string, line?: number) => {
       if (!(await einstellungenVerlassenOk())) return;
@@ -156,6 +174,7 @@ function Cockpit() {
       void refreshStatus();
       void refreshLogbuchOffen();
       void refreshAufgabenUeberfaellig();
+      void refreshBerichtsheftOffen();
       const n = data.changed.length + data.removed.length;
       if (data.fullRescan) notify({ kind: "live", text: "Vault neu eingelesen" });
       else if (n > 0) notify({ kind: "live", text: `${n} ${n === 1 ? "Änderung" : "Änderungen"} aus Obsidian übernommen` });
@@ -163,14 +182,15 @@ function Cockpit() {
     return () => {
       void un.then((f) => f());
     };
-  }, [refreshStatus, refreshLogbuchOffen, refreshAufgabenUeberfaellig, notify]);
+  }, [refreshStatus, refreshLogbuchOffen, refreshAufgabenUeberfaellig, refreshBerichtsheftOffen, notify]);
 
   // Bereichswechsel (z. B. nach den Einstellungen) → Zähler frisch
   useEffect(() => {
     if (!status?.vaultOk) return;
     void refreshLogbuchOffen();
     void refreshAufgabenUeberfaellig();
-  }, [view, status?.vaultOk, status?.vaultPath, refreshLogbuchOffen, refreshAufgabenUeberfaellig]);
+    void refreshBerichtsheftOffen();
+  }, [view, status?.vaultOk, status?.vaultPath, refreshLogbuchOffen, refreshAufgabenUeberfaellig, refreshBerichtsheftOffen]);
 
   // Strg+N: aktuelle Stunde → Notiz öffnen oder anlegen
   const strgNBusy = useRef(false);
@@ -299,6 +319,7 @@ function Cockpit() {
         editorDirty={editorDirty}
         logbuchOffen={logbuchOffen}
         aufgabenUeberfaellig={aufgabenUeberfaellig}
+        berichtsheftOffen={berichtsheftOffen}
       />
       <main className="main">
         {view === "heute" && (
@@ -350,6 +371,17 @@ function Cockpit() {
           <div className="view-host" hidden={view !== "fragen"}>
             <FragenView
               active={view === "fragen"}
+              change={change}
+              onOpenNote={openNote}
+              dirtyPath={dirtyPath}
+              onGoSettings={() => void go("einstellungen")}
+            />
+          </div>
+        )}
+        {berichtsheftMounted && (
+          <div className="view-host" hidden={view !== "berichtsheft"}>
+            <BerichtsheftView
+              active={view === "berichtsheft"}
               change={change}
               onOpenNote={openNote}
               dirtyPath={dirtyPath}

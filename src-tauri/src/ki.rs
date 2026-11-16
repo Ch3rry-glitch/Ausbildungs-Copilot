@@ -32,6 +32,10 @@ pub const KEYRING_KONTO: &str = "anthropic-api-key";
 pub const VERLAUF_DATEI: &str = "ki-verlauf.jsonl";
 pub const PROMPT_LOGBUCH: &str = "logbuch.md";
 const PROMPT_LOGBUCH_EINGEBAUT: &str = include_str!("../../prompts/logbuch.md");
+pub const PROMPT_BERICHTSHEFT: &str = "berichtsheft.md";
+const PROMPT_BERICHTSHEFT_EINGEBAUT: &str = include_str!("../../prompts/berichtsheft.md");
+pub const PROMPT_LERNFELDER: &str = "berichtsheft-lernfelder.md";
+const PROMPT_LERNFELDER_EINGEBAUT: &str = include_str!("../../prompts/berichtsheft-lernfelder.md");
 const MAX_TOKENS: u32 = 16000;
 const MAX_VERSUCHE: u32 = 2;
 
@@ -259,22 +263,185 @@ pub fn schluessel_loeschen() -> AppResult<()> {
 // Prompt
 // ---------------------------------------------------------------------------------------------
 
-/// Prompt für das Logbuch: `<App-Datenordner>/prompts/logbuch.md`, im Entwicklungs-Build die Datei
-/// im Repository (ohne Neukompilieren änderbar), sonst die eingebaute Fassung.
-pub fn prompt_logbuch(config_dir: &Path) -> String {
-    let eigene = config_dir.join("prompts").join(PROMPT_LOGBUCH);
+/// Prompt `datei`: `<App-Datenordner>/prompts/<datei>`, im Entwicklungs-Build die Datei im
+/// Repository (ohne Neukompilieren änderbar), sonst die eingebaute Fassung.
+pub fn prompt_laden(config_dir: &Path, datei: &str, eingebaut: &str) -> String {
+    let eigene = config_dir.join("prompts").join(datei);
     if let Ok(s) = fs::read_to_string(&eigene) {
         if !s.trim().is_empty() {
             return s;
         }
     }
     if cfg!(debug_assertions) {
-        let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("prompts").join(PROMPT_LOGBUCH);
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("prompts").join(datei);
         if let Ok(s) = fs::read_to_string(repo) {
             return s;
         }
     }
-    PROMPT_LOGBUCH_EINGEBAUT.to_string()
+    eingebaut.to_string()
+}
+
+/// Prompt für das Logbuch (`prompts/logbuch.md`).
+pub fn prompt_logbuch(config_dir: &Path) -> String {
+    prompt_laden(config_dir, PROMPT_LOGBUCH, PROMPT_LOGBUCH_EINGEBAUT)
+}
+
+/// Prompt für den ausformulierten Nachweis (`prompts/berichtsheft.md`).
+pub fn prompt_berichtsheft(config_dir: &Path) -> String {
+    prompt_laden(config_dir, PROMPT_BERICHTSHEFT, PROMPT_BERICHTSHEFT_EINGEBAUT)
+}
+
+/// Prompt für den Lernfeldbezug (`prompts/berichtsheft-lernfelder.md`).
+pub fn prompt_lernfelder(config_dir: &Path) -> String {
+    prompt_laden(config_dir, PROMPT_LERNFELDER, PROMPT_LERNFELDER_EINGEBAUT)
+}
+
+/// Die eingebauten Prompts (für die Regel-Tests).
+pub fn eingebaute_prompts() -> [(&'static str, &'static str); 3] {
+    [
+        (PROMPT_LOGBUCH, PROMPT_LOGBUCH_EINGEBAUT),
+        (PROMPT_BERICHTSHEFT, PROMPT_BERICHTSHEFT_EINGEBAUT),
+        (PROMPT_LERNFELDER, PROMPT_LERNFELDER_EINGEBAUT),
+    ]
+}
+
+// ---------------------------------------------------------------------------------------------
+// Anfordern, prüfen, einmal neu anfordern
+// ---------------------------------------------------------------------------------------------
+
+/// Ein Aufruf mit Prüfung: Antwort mit `pruefe` validieren, bei Verstoß verwerfen und einmal mit
+/// Hinweis neu anfordern (`MAX_VERSUCHE`). Verlauf mit `zweck` (nie Text). `ohne_ki` = Name des
+/// Knopfs für den Weg ohne KI (in Fehlermeldungen).
+#[allow(clippy::too_many_arguments)]
+pub fn anfordern<T>(
+    provider: &dyn LlmProvider,
+    system: &str,
+    basis: &str,
+    schema: Value,
+    zweck: &str,
+    ohne_ki: &str,
+    verlauf_dir: Option<&Path>,
+    pruefe: impl Fn(&str) -> Result<T, String>,
+) -> AppResult<(T, KiAufruf)> {
+    let mut nutzer = basis.to_string();
+    let mut aufruf = KiAufruf { modell: provider.modell().to_string(), eingabe_tokens: 0, ausgabe_tokens: 0, kosten_usd: 0.0, versuche: 0 };
+    let mut letzter = String::new();
+    for _ in 0..MAX_VERSUCHE {
+        aufruf.versuche += 1;
+        let anfrage = LlmAnfrage { system: system.to_string(), nutzer: nutzer.clone(), schema: schema.clone(), max_tokens: MAX_TOKENS };
+        let antwort = match provider.senden(&anfrage) {
+            Ok(a) => a,
+            Err(e) => {
+                if let Some(d) = verlauf_dir {
+                    verlauf_anhaengen(d, zweck, provider.modell(), 0, 0, "fehler");
+                }
+                return Err(e);
+            }
+        };
+        aufruf.eingabe_tokens += antwort.eingabe_tokens;
+        aufruf.ausgabe_tokens += antwort.ausgabe_tokens;
+        aufruf.kosten_usd = kosten_usd(provider.modell(), aufruf.eingabe_tokens, aufruf.ausgabe_tokens);
+        let ergebnis = match antwort.stop_reason.as_str() {
+            "refusal" => {
+                if let Some(d) = verlauf_dir {
+                    verlauf_anhaengen(d, zweck, provider.modell(), antwort.eingabe_tokens, antwort.ausgabe_tokens, "abgelehnt");
+                }
+                return Err(AppError::Ki(format!("Die KI hat die Anfrage abgelehnt. Bitte „{ohne_ki}“ benutzen.")));
+            }
+            "max_tokens" => Err("Die Antwort wurde abgeschnitten.".to_string()),
+            _ => pruefe(&antwort.text),
+        };
+        if let Some(d) = verlauf_dir {
+            let e = if ergebnis.is_ok() { "ok" } else { "verworfen" };
+            verlauf_anhaengen(d, zweck, provider.modell(), antwort.eingabe_tokens, antwort.ausgabe_tokens, e);
+        }
+        match ergebnis {
+            Ok(inhalt) => return Ok((inhalt, aufruf)),
+            Err(v) => {
+                letzter = v.clone();
+                nutzer = format!(
+                    "{basis}\nDeine vorige Antwort wurde verworfen: {v} Antworte erneut – nur JSON nach dem Schema und unter Beachtung aller Regeln."
+                );
+            }
+        }
+    }
+    Err(AppError::Ki(format!("Die KI-Antwort war zweimal ungültig ({letzter}) – bitte „{ohne_ki}“ benutzen.")))
+}
+
+// ---------------------------------------------------------------------------------------------
+// Berichtsheft mit KI
+// ---------------------------------------------------------------------------------------------
+
+/// Schema des Nachweises: je Tag Datum, Abschnitt, Überschrift, Absätze, Lücken.
+pub fn nachweis_schema() -> Value {
+    let liste = json!({"type": "array", "items": {"type": "string"}});
+    json!({
+        "type": "object",
+        "properties": {
+            "tage": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "datum": {"type": "string"},
+                        "abschnitt": {"type": "string", "enum": ["berufsschule", "betrieb"]},
+                        "ueberschrift": {"type": "string"},
+                        "absaetze": liste,
+                        "luecken": liste,
+                    },
+                    "required": ["datum", "abschnitt", "ueberschrift", "absaetze", "luecken"],
+                    "additionalProperties": false,
+                },
+            },
+        },
+        "required": ["tage"],
+        "additionalProperties": false,
+    })
+}
+
+/// Schema des Lernfeldbezugs: `nr` = Index der Tätigkeit ab 1.
+pub fn lernfelder_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "zuordnungen": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "nr": {"type": "integer"},
+                        "lernfelder": {"type": "array", "items": {"type": "integer"}},
+                    },
+                    "required": ["nr", "lernfelder"],
+                    "additionalProperties": false,
+                },
+            },
+        },
+        "required": ["zuordnungen"],
+        "additionalProperties": false,
+    })
+}
+
+/// Nachweis ausformulieren (Zweck `berichtsheft`). Geprüft wird mit `pruefe` (Regeln 3, 4, 6).
+pub fn berichtsheft_ki<T>(
+    provider: &dyn LlmProvider,
+    system: &str,
+    nutzer: &str,
+    verlauf_dir: Option<&Path>,
+    pruefe: impl Fn(&str) -> Result<T, String>,
+) -> AppResult<(T, KiAufruf)> {
+    anfordern(provider, system, nutzer, nachweis_schema(), "berichtsheft", "Ohne KI formulieren", verlauf_dir, pruefe)
+}
+
+/// Lernfelder vorschlagen (Zweck `lernfelder`).
+pub fn lernfelder_ki<T>(
+    provider: &dyn LlmProvider,
+    system: &str,
+    nutzer: &str,
+    verlauf_dir: Option<&Path>,
+    pruefe: impl Fn(&str) -> Result<T, String>,
+) -> AppResult<(T, KiAufruf)> {
+    anfordern(provider, system, nutzer, lernfelder_schema(), "lernfelder", "Vorschläge laden", verlauf_dir, pruefe)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -438,58 +605,18 @@ pub fn logbuch_ki(
 ) -> AppResult<(KiInhalt, KiAufruf)> {
     let hatte_fragen = !k.gefundene_fragen.is_empty();
     let hatte_naechstes = !k.naechstes.is_empty();
-    let basis = nutzer_text(k);
-    let mut nutzer = basis.clone();
-    let mut aufruf = KiAufruf { modell: provider.modell().to_string(), eingabe_tokens: 0, ausgabe_tokens: 0, kosten_usd: 0.0, versuche: 0 };
-    let mut letzter = String::new();
-    for _ in 0..MAX_VERSUCHE {
-        aufruf.versuche += 1;
-        let anfrage = LlmAnfrage { system: system.to_string(), nutzer: nutzer.clone(), schema: schema(), max_tokens: MAX_TOKENS };
-        let antwort = match provider.senden(&anfrage) {
-            Ok(a) => a,
-            Err(e) => {
-                if let Some(d) = verlauf_dir {
-                    verlauf_anhaengen(d, "logbuch", provider.modell(), 0, 0, "fehler");
-                }
-                return Err(e);
-            }
-        };
-        aufruf.eingabe_tokens += antwort.eingabe_tokens;
-        aufruf.ausgabe_tokens += antwort.ausgabe_tokens;
-        aufruf.kosten_usd = kosten_usd(provider.modell(), aufruf.eingabe_tokens, aufruf.ausgabe_tokens);
-        let ergebnis = match antwort.stop_reason.as_str() {
-            "refusal" => {
-                if let Some(d) = verlauf_dir {
-                    verlauf_anhaengen(d, "logbuch", provider.modell(), antwort.eingabe_tokens, antwort.ausgabe_tokens, "abgelehnt");
-                }
-                return Err(AppError::Ki("Die KI hat die Anfrage abgelehnt. Bitte „Ohne KI befüllen“ benutzen.".into()));
-            }
-            "max_tokens" => Err("Die Antwort wurde abgeschnitten.".to_string()),
-            _ => pruefe_antwort(&antwort.text, hatte_fragen, hatte_naechstes),
-        };
-        if let Some(d) = verlauf_dir {
-            let e = if ergebnis.is_ok() { "ok" } else { "verworfen" };
-            verlauf_anhaengen(d, "logbuch", provider.modell(), antwort.eingabe_tokens, antwort.ausgabe_tokens, e);
-        }
-        match ergebnis {
-            Ok(inhalt) => return Ok((inhalt, aufruf)),
-            Err(v) => {
-                letzter = v.clone();
-                nutzer = format!(
-                    "{basis}\nDeine vorige Antwort wurde verworfen: {v} Antworte erneut – nur JSON nach dem Schema und unter Beachtung aller Regeln."
-                );
-            }
-        }
-    }
-    Err(AppError::Ki(format!("Die KI-Antwort war zweimal ungültig ({letzter}) – bitte „Ohne KI befüllen“ benutzen.")))
+    anfordern(provider, system, &nutzer_text(k), schema(), "logbuch", "Ohne KI befüllen", verlauf_dir, |text| {
+        pruefe_antwort(text, hatte_fragen, hatte_naechstes)
+    })
 }
 
+/// Testanbieter für die Unit-Tests aller Module (nie ein echter Schlüssel, nie ein Netzaufruf).
 #[cfg(test)]
-mod tests {
+pub(crate) mod attrappe {
     use super::*;
     use std::sync::Mutex;
 
-    /// Testanbieter: liefert vorbereitete Antworten und merkt sich die Anfragen.
+    /// Liefert vorbereitete Antworten und merkt sich die Anfragen.
     pub struct Attrappe {
         pub antworten: Mutex<Vec<String>>,
         pub anfragen: Mutex<Vec<LlmAnfrage>>,
@@ -514,6 +641,12 @@ mod tests {
             Ok(LlmAntwort { text, eingabe_tokens: 1000, ausgabe_tokens: 200, modell: "claude-opus-5-5".into(), stop_reason: "end_turn".into() })
         }
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::attrappe::Attrappe;
+    use super::*;
 
     fn kontext(fragen: &[&str]) -> KiKontext {
         KiKontext {
@@ -617,5 +750,23 @@ mod tests {
         fs::create_dir_all(dir.path().join("prompts")).unwrap();
         fs::write(dir.path().join("prompts").join(PROMPT_LOGBUCH), "eigener Prompt").unwrap();
         assert_eq!(prompt_logbuch(dir.path()), "eigener Prompt");
+        assert!(prompt_berichtsheft(dir.path()).contains("Lücke"));
+        assert!(prompt_lernfelder(dir.path()).contains("zuordnungen"));
+        fs::write(dir.path().join("prompts").join(PROMPT_BERICHTSHEFT), "eigener Nachweis-Prompt").unwrap();
+        assert_eq!(prompt_berichtsheft(dir.path()), "eigener Nachweis-Prompt");
+    }
+
+    #[test]
+    fn schemata_ohne_zusaetzliche_felder() {
+        let n = nachweis_schema();
+        assert_eq!(n["additionalProperties"], false);
+        assert_eq!(n["properties"]["tage"]["items"]["additionalProperties"], false);
+        let l = lernfelder_schema();
+        assert_eq!(l["properties"]["zuordnungen"]["items"]["required"], json!(["nr", "lernfelder"]));
+        // verworfen, dann Fehler mit dem Knopfnamen des Wegs ohne KI
+        let p = Attrappe::neu(&["kein json", "auch nicht"]);
+        let r: AppResult<((), KiAufruf)> = berichtsheft_ki(&p, "sys", "nutzer", None, |_| Err("kaputt".into()));
+        assert!(matches!(&r, Err(AppError::Ki(m)) if m.contains("Ohne KI formulieren")), "{r:?}");
+        assert_eq!(p.anfragen.lock().unwrap().len(), 2);
     }
 }

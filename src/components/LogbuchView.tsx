@@ -11,11 +11,10 @@ import {
   errorText,
   formatTagDatum,
   isoWoche,
+  kiZeile,
   LOGBUCH_STATUS_BADGE,
   samePath,
   type AbschnittQuelle,
-  type KiAufruf,
-  type KiModell,
   type KiStatus,
   type LogbuchEntwurf,
   type LogbuchFachTage,
@@ -65,17 +64,6 @@ const gleich = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 /** wie `titel_norm` im Backend: Rand und abschließender Doppelpunkt zählen nicht */
 const titelNorm = (s: string) => s.trim().replace(/:+$/, "").trim();
 const notizenText = (n: number) => `${n} ${n === 1 ? "Notiz" : "Notizen"}`;
-
-function kiZeile(k: KiAufruf, modelle: KiModell[] | undefined): string {
-  const name = modelle?.find((m) => m.id === k.modell)?.name ?? k.modell;
-  const tok = (n: number) => n.toLocaleString("de-DE");
-  const kosten = k.kostenUsd.toLocaleString("de-DE", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: k.kostenUsd < 0.1 ? 4 : 2,
-  });
-  const versuche = k.versuche > 1 ? ` · ${k.versuche} Versuche` : "";
-  return `KI: ${name} · ${tok(k.eingabeTokens)}+${tok(k.ausgabeTokens)} Tokens · ≈ ${kosten} $${versuche}`;
-}
 
 function statusDetail(r: LogbuchStatusReport): string[] {
   return [

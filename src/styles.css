@@ -598,3 +598,106 @@ input[type="date"].input::-webkit-calendar-picker-indicator { filter: invert(0.8
 .radio-option input:disabled { cursor: default; }
 .radio-label { display: block; color: var(--text); font-weight: 600; }
 .radio-hint { display: block; margin-top: 2px; }
+
+/* ======================================================================
+   M4: Berichtsheft, Diff vor dem Schreiben
+   ====================================================================== */
+
+/* Zeilen-Diff (erweitert die diff-*-Klassen von „Geklärt“) */
+.modal-diff { width: min(1040px, 94vw) !important; }
+.modal-diff .modal-head .hint { margin-top: 2px; }
+.diff-dialog-body { display: flex; flex-direction: column; gap: 10px; }
+.diff-view { border: 1px solid var(--glass-border); border-radius: var(--radius-sm); background: rgba(0, 0, 0, 0.22); overflow: hidden; }
+.diff-summe { padding: 8px 12px; font-size: 12px; color: var(--text-3); border-bottom: 1px solid var(--glass-border); font-variant-numeric: tabular-nums; }
+.diff-plus { color: var(--mint); font-weight: 700; }
+.diff-minus { color: var(--red); font-weight: 700; }
+.diff-body { max-height: 56vh; overflow: auto; font-family: var(--mono); font-size: 12.3px; line-height: 1.55; user-select: text; }
+.diff-line { display: grid; grid-template-columns: 44px 44px 20px 1fr; color: var(--text-2); }
+.diff-line.neu { background: rgba(94, 234, 212, 0.09); color: var(--text); }
+.diff-line.weg { background: rgba(251, 113, 133, 0.1); color: var(--text); }
+.diff-nr { padding: 0 8px; text-align: right; color: var(--text-3); font-size: 11px; font-variant-numeric: tabular-nums; user-select: none; border-right: 1px solid rgba(255, 255, 255, 0.05); }
+.diff-sign { text-align: center; font-weight: 700; user-select: none; }
+.diff-line.neu .diff-sign { color: var(--mint); }
+.diff-line.weg .diff-sign { color: var(--red); }
+.diff-text { padding: 0 12px 0 4px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.diff-gap { padding: 3px 12px; font-family: var(--font); font-size: 11.5px; color: var(--text-3); background: rgba(255, 255, 255, 0.04); border-top: 1px dashed var(--glass-border); border-bottom: 1px dashed var(--glass-border); user-select: none; }
+.diff-leer { padding: 18px 16px; border-radius: var(--radius-sm); border: 1px dashed var(--glass-border); color: var(--text-2); text-align: center; }
+
+/* Wochenliste */
+.bh-grid { grid-template-columns: 330px 1fr; }
+.bh-neu-knopf { flex: none; white-space: nowrap; }
+/* Kopf der Woche: Status-Badges brechen bei schmalem Fenster um statt seitlich zu scrollen */
+.bh-kopf-titel { flex-wrap: wrap; row-gap: 6px; }
+.bh-kopf-titel .preview-title { min-width: 0; }
+.bh-woche { padding: 10px 12px; }
+.bh-woche.aktuell { border-left: 3px solid var(--purple-2); }
+.bh-woche.ohne { opacity: 0.55; cursor: default; }
+.bh-woche.ohne:hover { opacity: 0.8; background: none; }
+.bh-woche .note-meta .btn { padding: 4px 10px; }
+.bh-zeitraum { margin-left: 8px; font-weight: 400; font-size: 12px; color: var(--text-3); }
+
+/* Woche rechts */
+.bh-tabs { align-self: flex-start; }
+.bh-tabs-host { display: flex; flex-direction: column; }
+.bh-tab { display: flex; flex-direction: column; gap: 12px; }
+.bh-toolbar .row { align-items: center; }
+.bh-offen { gap: 4px; }
+.bh-offen-punkt { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--text-2); }
+.bh-offen-box { width: 13px; height: 13px; border-radius: 4px; border: 1.5px solid var(--amber); flex: none; }
+.bh-offen-text { flex: 1; min-width: 0; overflow-wrap: anywhere; user-select: text; }
+
+/* Tageskarten (Tage und Nachweis) */
+.bh-tag.fehlt { border-color: rgba(252, 211, 77, 0.35); }
+.bh-tag.aus { opacity: 0.6; }
+.bh-tag-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.bh-tag-titel { font-weight: 700; font-size: 13.5px; color: var(--text); }
+.bh-tag-aktionen { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; }
+.bh-punkte { list-style: none; margin: 2px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.bh-punkt { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; padding: 5px 10px; border-radius: 10px; border-left: 3px solid rgba(255, 255, 255, 0.12); background: rgba(0, 0, 0, 0.12); }
+.bh-punkt-text { font-size: 13px; color: var(--text); overflow-wrap: anywhere; user-select: text; }
+.bh-punkt-hinweis { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
+.bh-punkt-hinweis svg { width: 13px; height: 13px; }
+.bh-punkt-hinweis .lb-link { font-size: 12px; padding: 0; white-space: nowrap; }
+.bh-punkt.luecke { border-left-color: var(--amber); background: rgba(252, 211, 77, 0.09); }
+.bh-punkt.luecke .bh-punkt-hinweis { color: var(--amber); }
+.bh-punkt.diagnose { border-left-color: var(--red); background: var(--red-bg); }
+.bh-punkt.diagnose .bh-punkt-hinweis { color: var(--red); }
+.bh-unterricht { margin-top: 4px; }
+
+/* Bearbeiten eines Tages */
+.bh-editor { display: flex; flex-direction: column; gap: 10px; padding-top: 4px; }
+.bh-arten { flex-wrap: wrap; border-radius: 16px; align-self: flex-start; }
+.bh-textarea { resize: vertical; line-height: 1.5; font-size: 13px; }
+.bh-sondertag { padding: 10px 12px; border-radius: var(--radius-sm); border: 1px dashed var(--glass-border); color: var(--text-2); }
+.bh-sondertag strong { color: var(--text); }
+.bh-diagnose-hinweis { display: flex; align-items: flex-start; gap: 8px; color: var(--red); }
+.bh-diagnose-hinweis svg { width: 14px; height: 14px; flex: none; margin-top: 2px; }
+
+/* Nachweis: Absätze und Lücken */
+.bh-absatz { min-height: 54px; }
+.bh-luecke { padding: 8px 12px; border-radius: 10px; border: 1px solid rgba(252, 211, 77, 0.35); background: rgba(252, 211, 77, 0.09); color: var(--amber); font-size: 13px; user-select: text; cursor: default; }
+
+/* Tabellen mit Eingabefeldern (Lernfelder, Betrieb.md) */
+.bh-table td { vertical-align: middle; }
+.bh-table tr.bh-zeile-aus td { opacity: 0.6; }
+/* nur die Tabelle scrollt seitlich, nicht die ganze Wochenansicht */
+.bh-tabelle-scroll { overflow-x: auto; }
+.bh-zelle-breit { min-width: 130px; }
+.bh-cell-input { width: 100%; padding: 6px 9px; font-size: 12.5px; }
+.bh-zelle-badge { margin-top: 4px; }
+.bh-lf-chips { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; min-width: 150px; }
+.bh-lf-chip { border: none; cursor: pointer; font: inherit; font-size: 11.5px; font-weight: 600; }
+.bh-lf-chip:hover:not(:disabled) { background: rgba(139, 92, 246, 0.35); }
+.bh-lf-chip:disabled { cursor: default; opacity: 0.6; }
+.bh-lf-add { padding: 3px 8px; font-size: 12px; max-width: 120px; }
+
+/* Wochennotiz anlegen */
+.modal-bh-neu { width: min(920px, 94vw) !important; }
+.bh-neu-body { display: flex; flex-direction: column; gap: 10px; }
+.bh-neu-body .warn { margin-bottom: 0; }
+.bh-neu-kopf { display: flex; align-items: center; gap: 10px; }
+.bh-neu-kopf .pills { padding: 3px; }
+.bh-neu-kopf .pill { padding: 4px 11px; }
+.bh-neu-vorschau { max-height: 46vh; overflow: auto; border: 1px solid var(--glass-border); border-radius: var(--radius-sm); background: rgba(0, 0, 0, 0.18); }
+.bh-neu-vorschau .md-preview { overflow: visible; padding: 4px 20px 18px; }
+.bh-neu-vorschau .lb-vorschau { max-height: none; border: none; border-radius: 0; background: none; }

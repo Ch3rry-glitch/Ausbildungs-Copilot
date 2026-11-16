@@ -204,6 +204,86 @@ export interface FrageGeklaert {
 }
 export interface FragenEinstellungen { geklaertModus: GeklaertModus; }
 
+// ---------- M4: Berichtsheft (Vertrag laut Design M4) ----------
+/** Vault-relativer Pfad mit „/“ (Rust `RelPath`) */
+export type RelPath = string;
+export type TagAbschnitt = "berufsschule" | "betrieb";
+/** Rust `TagArt` (M4). In TS umbenannt – `TagArt` ist schon die Tagesart von „Heute“ (M1). */
+export type BerichtsTagArt = "stichpunkte" | "krank" | "urlaub" | "feiertag" | "entfallen";
+/** `platzhalter` = nur ⟨…⟩ oder *noch einzutragen* */
+export type NachweisStand = "fehlt" | "platzhalter" | "vorhanden";
+
+export interface Stichpunkt {
+  line: number /* Dateizeile wie Task.line */; text: string /* ohne "- " */; luecke: boolean;
+  diagnose: string | null; fach: string | null /* Berufsschule: Kürzel der Zeile */; links: string[];
+}
+export interface WochenUnterricht {
+  path: RelPath; title: string; fach: string | null; thema: string | null; datum: string;
+  verlinkt: boolean /* steht schon als [[…]] in der Woche */; privat: boolean;
+}
+export interface BerichtsTag {
+  abschnitt: TagAbschnitt; datum: string; wochentag: string /* "Dienstag" */; ueberschriftZeile: number | null;
+  art: BerichtsTagArt; stichpunkte: Stichpunkt[]; fehlt: boolean; bearbeitbar: boolean; hinweis: string | null;
+  unterricht: WochenUnterricht[] /* nur Berufsschule, Notizen dieses Tages */; nachweis: NachweisStand;
+}
+export interface LernfeldZeile { line: number; taetigkeit: string; lernfelder: number[]; zelle: string /* Originalzelle */; }
+export interface OffenerPunkt { line: number; text: string; }
+export interface BerichtsWoche {
+  path: RelPath; title: string; jahr: number; kw: number; montag: string; sonntag: string;
+  status: string | null; abgezeichnet: boolean; stunden: string | null; lernfelder: number[];
+  tage: BerichtsTag[] /* nach Datum, Berufsschule vor Betrieb am selben Tag */;
+  lernfeldTabelle: LernfeldZeile[]; offenePunkte: OffenerPunkt[]; warnungen: string[]; version: NoteVersion;
+}
+export interface WochenZeile {
+  path: RelPath | null /* null = Woche ohne Notiz */; stem: string /* "2026-KW46" */; jahr: number; kw: number;
+  montag: string; sonntag: string; status: string | null; abgezeichnet: boolean; stunden: string | null;
+  fehlendeTage: string[] /* "Di 10.11." */; offenePunkte: number; luecken: number; diagnosen: number; aktuell: boolean;
+}
+export interface BerichtsheftUebersicht {
+  heute: string; aktuelleWoche: string; aktuelleVorhanden: boolean;
+  wochen: WochenZeile[] /* neueste zuerst; fehlende Wochen eingereiht */; offenVorwochen: number /* Badge */;
+}
+export interface NeueWoche { datum: string /* irgendein Tag der Woche */; }
+export interface WochenVorschau {
+  relPath: RelPath; text: string; existiert: RelPath | null; eingetragen: RelPath[] /* Unterrichtsnotizen */; warnungen: string[];
+}
+/** Ergebnis jedes schreibenden M4-Befehls (Vorschau oder geschrieben) */
+export interface Aenderung {
+  path: RelPath; vorher: string; nachher: string /* ganze Datei, wie geschrieben würde */;
+  version: NoteVersion /* Stand beim Lesen = Basis */; unveraendert: boolean; warnungen: string[];
+  report: WriteReport | null /* nur nach dem Schreiben */;
+}
+export interface SchultageUebernehmen { path: RelPath; vorschau: boolean; basis: NoteVersion | null; }
+export interface TagSpeichern {
+  path: RelPath; abschnitt: TagAbschnitt; datum: string; art: BerichtsTagArt; stichpunkte: string[]; basis: NoteVersion;
+}
+export interface NachweisAnfrage { path: RelPath; mitKi: boolean; privatErlauben: boolean /* nur dieser Vorgang (Regel 10) */; }
+export interface NachweisTag {
+  datum: string; abschnitt: TagAbschnitt; wochentag: string; ueberschrift: string; absaetze: string[];
+  luecken: string[]; vorhanden: NachweisStand; uebernehmen: boolean /* Vorschlag */; ki: boolean;
+}
+export interface NachweisQuelle { path: RelPath; title: string; privat: boolean; gesendet: boolean /* mit KI: gesendet; ohne: würde */; ekEntfernt: boolean; }
+export interface NachweisEntwurf {
+  path: RelPath; tage: NachweisTag[]; quellen: NachweisQuelle[]; mitKi: boolean; ki: KiAufruf | null;
+  fehlendeTage: string[]; warnungen: string[];
+}
+export interface NachweisSchreiben { path: RelPath; tage: NachweisTag[] /* nur die zu schreibenden */; vorschau: boolean; basis: NoteVersion | null; }
+export interface LernfeldVorschlag {
+  taetigkeit: string; abschnitt: TagAbschnitt; quelle: string /* "Di 10.11." / "GEC 09.11.2026" */; lernfelder: number[];
+  grund: string /* "Betrieb.md" | "Lernfeld der Unterrichtsnotiz" | "KI" | "" */; schonInTabelle: boolean;
+}
+export interface LernfeldAnfrage { path: RelPath; mitKi: boolean; privatErlauben: boolean; }
+export interface LernfeldEntwurf {
+  path: RelPath; vorschlaege: LernfeldVorschlag[]; lernfelder: LernfeldInfo[]; ki: KiAufruf | null; warnungen: string[];
+}
+export interface NeueLernfeldZeile { taetigkeit: string; lernfelder: number[]; }
+export interface LernfelderSchreiben { path: RelPath; zeilen: NeueLernfeldZeile[]; vorschau: boolean; basis: NoteVersion | null; }
+export interface BetriebZeile { zellen: string[] /* Länge = spalten */; taetigkeit: string; uebernehmen: boolean; grund: string; }
+export interface BetriebVorschlag {
+  betriebPath: RelPath; spalten: string[]; zeilen: BetriebZeile[]; schonVorhanden: string[]; warnungen: string[];
+}
+export interface BetriebFortschreiben { wochePath: RelPath; zeilen: string[][]; vorschau: boolean; basis: NoteVersion | null; }
+
 export interface FolderInfo {
   path: string;
   name: string;
@@ -268,6 +348,19 @@ export const api = {
   fragenEinstellungen: () => invoke<FragenEinstellungen>("fragen_einstellungen"),
   fragenEinstellungenSpeichern: (einstellungen: FragenEinstellungen) =>
     invoke<FragenEinstellungen>("fragen_einstellungen_speichern", { einstellungen }),
+  // M4 – schreibende Befehle mit `vorschau` schreiben erst mit `vorschau: false` und `basis` (Regel 9)
+  berichtsheftUebersicht: (datum: string | null) => invoke<BerichtsheftUebersicht>("berichtsheft_uebersicht", { datum }),
+  berichtsheftWoche: (path: RelPath) => invoke<BerichtsWoche>("berichtsheft_woche", { path }),
+  berichtsheftWocheVorschau: (req: NeueWoche) => invoke<WochenVorschau>("berichtsheft_woche_vorschau", { req }),
+  berichtsheftWocheAnlegen: (req: NeueWoche) => invoke<CreateResult>("berichtsheft_woche_anlegen", { req }),
+  berichtsheftSchultage: (req: SchultageUebernehmen) => invoke<Aenderung>("berichtsheft_schultage", { req }),
+  berichtsheftTagSpeichern: (req: TagSpeichern) => invoke<Aenderung>("berichtsheft_tag_speichern", { req }),
+  berichtsheftNachweis: (req: NachweisAnfrage) => invoke<NachweisEntwurf>("berichtsheft_nachweis", { req }),
+  berichtsheftNachweisSchreiben: (req: NachweisSchreiben) => invoke<Aenderung>("berichtsheft_nachweis_schreiben", { req }),
+  berichtsheftLernfelder: (req: LernfeldAnfrage) => invoke<LernfeldEntwurf>("berichtsheft_lernfelder", { req }),
+  berichtsheftLernfelderSchreiben: (req: LernfelderSchreiben) => invoke<Aenderung>("berichtsheft_lernfelder_schreiben", { req }),
+  betriebVorschlag: (path: RelPath) => invoke<BetriebVorschlag>("betrieb_vorschlag", { path }),
+  betriebFortschreiben: (req: BetriebFortschreiben) => invoke<Aenderung>("betrieb_fortschreiben", { req }),
 };
 
 export function onVaultChanged(cb: (c: VaultChanged) => void): Promise<UnlistenFn> {
@@ -351,6 +444,18 @@ export function baseName(path: string): string {
 export function samePath(a: string | null | undefined, b: string | null | undefined): boolean {
   const norm = (s: string) => s.replace(/\\/g, "/").toLowerCase();
   return !!a && !!b && norm(a) === norm(b);
+}
+
+/** Kostenzeile eines KI-Aufrufs: „KI: Modell · 1.234+567 Tokens · ≈ 0,0042 $“ */
+export function kiZeile(k: KiAufruf, modelle: KiModell[] | undefined): string {
+  const name = modelle?.find((m) => m.id === k.modell)?.name ?? k.modell;
+  const tok = (n: number) => n.toLocaleString("de-DE");
+  const kosten = k.kostenUsd.toLocaleString("de-DE", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: k.kostenUsd < 0.1 ? 4 : 2,
+  });
+  const versuche = k.versuche > 1 ? ` · ${k.versuche} Versuche` : "";
+  return `KI: ${name} · ${tok(k.eingabeTokens)}+${tok(k.ausgabeTokens)} Tokens · ≈ ${kosten} $${versuche}`;
 }
 
 export function errorText(e: unknown): string {

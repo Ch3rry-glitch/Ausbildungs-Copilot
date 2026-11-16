@@ -1,7 +1,7 @@
 import type { AppStatus } from "../api";
 import { Icon } from "../icons";
 
-export type View = "heute" | "unterricht" | "logbuch" | "aufgaben" | "fragen" | "notizen" | "einstellungen";
+export type View = "heute" | "unterricht" | "logbuch" | "aufgaben" | "fragen" | "berichtsheft" | "notizen" | "einstellungen";
 
 // Reihenfolge laut SPEC §8. Noch nicht gebaute Bereiche zeigen ihren Meilenstein.
 const ACTIVE: { key: View; label: string }[] = [
@@ -10,10 +10,10 @@ const ACTIVE: { key: View; label: string }[] = [
   { key: "logbuch", label: "Logbuch" },
   { key: "aufgaben", label: "Aufgaben" },
   { key: "fragen", label: "Fragen" },
+  { key: "berichtsheft", label: "Berichtsheft" },
 ];
 
 const SOON: { key: string; label: string; milestone: string }[] = [
-  { key: "berichtsheft", label: "Berichtsheft", milestone: "M4" },
   { key: "inbox", label: "Inbox", milestone: "M5" },
   { key: "pruefungen", label: "Prüfungen", milestone: "M6" },
 ];
@@ -25,6 +25,7 @@ export function Sidebar({
   editorDirty,
   logbuchOffen,
   aufgabenUeberfaellig,
+  berichtsheftOffen,
 }: {
   view: View;
   onView: (v: View) => void;
@@ -34,6 +35,8 @@ export function Sidebar({
   logbuchOffen: number | null;
   /** Zahl überfälliger Arbeitsaufträge; null = keine Anzeige */
   aufgabenUeberfaellig: number | null;
+  /** Vorwochen mit Offenem (fehlende Tage, offene Punkte); null = keine Anzeige */
+  berichtsheftOffen: number | null;
 }) {
   return (
     <aside className="sidebar glass">
@@ -61,6 +64,14 @@ export function Sidebar({
               title={aufgabenUeberfaellig === 1 ? "1 überfällige Aufgabe" : `${aufgabenUeberfaellig} überfällige Aufgaben`}
             >
               {aufgabenUeberfaellig}
+            </span>
+          )}
+          {it.key === "berichtsheft" && berichtsheftOffen != null && berichtsheftOffen > 0 && (
+            <span
+              className="nav-count"
+              title={berichtsheftOffen === 1 ? "1 Vorwoche mit Offenem" : `${berichtsheftOffen} Vorwochen mit Offenem`}
+            >
+              {berichtsheftOffen}
             </span>
           )}
         </button>

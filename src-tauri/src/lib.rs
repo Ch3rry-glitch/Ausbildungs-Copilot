@@ -16,9 +16,11 @@
 //! * [`ki`]      – KI hinter `LlmProvider` (Anthropic), Schlüssel im Anmeldeinformationsspeicher
 //! * [`aufgaben`] – Arbeitsaufträge und Lernaufgaben wie `00 Start/Aufgaben.md`, Abhaken, gelöst
 //! * [`fragen`]  – `#frage` / `#nochmal`, „geklärt“ (durchstreichen oder in „Geklärt“ verschieben)
+//! * [`berichtsheft`] – Wochen, Tage, Nachweis, Lernfeldbezug, `Betrieb.md` (Regeln 3, 4, 9)
 //! * [`commands`] – Tauri-Befehle
 
 pub mod aufgaben;
+pub mod berichtsheft;
 pub mod commands;
 pub mod config;
 pub mod error;
@@ -206,6 +208,18 @@ pub fn run() {
             commands::frage_klaeren,
             commands::fragen_einstellungen,
             commands::fragen_einstellungen_speichern,
+            commands::berichtsheft_uebersicht,
+            commands::berichtsheft_woche,
+            commands::berichtsheft_woche_vorschau,
+            commands::berichtsheft_woche_anlegen,
+            commands::berichtsheft_schultage,
+            commands::berichtsheft_tag_speichern,
+            commands::berichtsheft_nachweis,
+            commands::berichtsheft_nachweis_schreiben,
+            commands::berichtsheft_lernfelder,
+            commands::berichtsheft_lernfelder_schreiben,
+            commands::betrieb_vorschlag,
+            commands::betrieb_fortschreiben,
         ])
         .run(tauri::generate_context!())
         .expect("Ausbildungs-Cockpit konnte nicht gestartet werden");
