@@ -14,6 +14,8 @@ import { KlausurView } from "./components/KlausurView";
 import { CreateNoteDialog } from "./components/CreateNoteDialog";
 import { askUnsaved, isModalOpen } from "./components/Modal";
 import { ToastProvider, useToast } from "./toast";
+import { UpdateHinweis } from "./components/UpdateHinweis";
+import { setUpdateSperre } from "./update";
 
 export default function App() {
   return (
@@ -287,6 +289,19 @@ function Cockpit() {
     };
   }, []);
 
+  // Update installieren beendet die App sofort (ohne Schließen-Rückfrage) → vorher ungesicherte Arbeit prüfen
+  useEffect(() => {
+    setUpdateSperre(async () => {
+      const ed = editorRef.current;
+      if (ed) await ed.whenIdle();
+      if (ed?.dirty) return "Die offene Notiz hat ungespeicherte Änderungen – erst speichern, dann aktualisieren.";
+      if (logbuchUngesichert.current) return "Der Logbuch-Entwurf ist noch nicht kopiert – erst kopieren, dann aktualisieren.";
+      if (einstellungenDirty.current) return "Die Logbuch-Einstellungen sind noch nicht gespeichert – erst speichern, dann aktualisieren.";
+      return null;
+    });
+    return () => setUpdateSperre(null);
+  }, []);
+
   // Pfad der Editor-Notiz mit ungespeicherten Änderungen (sperrt „Kopieren“ im Logbuch)
   const dirtyPath = editorDirty ? (editorRef.current?.currentPath ?? null) : null;
 
@@ -303,7 +318,9 @@ function Cockpit() {
         editorDirty={editorDirty}
         logbuchOffen={logbuchOffen}
         aufgabenUeberfaellig={aufgabenUeberfaellig}
-      />
+      >
+        <UpdateHinweis version={status.version} />
+      </Sidebar>
       <main className="main">
         {view === "heute" && (
           <HeuteView

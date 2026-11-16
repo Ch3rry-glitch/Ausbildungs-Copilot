@@ -71,6 +71,10 @@ Logbucheinträge für Moodle. Der Vault bleibt die einzige Wahrheit; Obsidian fu
 4. Den Ordner in [Obsidian](https://obsidian.md) mit **„Ordner als Vault öffnen“** öffnen und unter
    *Einstellungen → Community-Plugins* **Dataview** und **Tasks** installieren.
 5. In `00 Start/Stundenplan.md` den eigenen Stundenplan eintragen – die App liest ihn von dort.
+6. **Updates:** Gibt es eine neue Version, erscheint links unten „Neue Version … verfügbar“ →
+   **Jetzt aktualisieren**. Die App schließt sich kurz und startet danach von selbst neu. Von Hand:
+   *Einstellungen → Updates → Nach Updates suchen*. Die App fragt dafür höchstens einmal am Tag GitHub
+   nach der Versionsdatei – ohne Internet einfach nicht; aus dem Vault wird nichts gesendet.
 
 ## Entwicklung
 
@@ -80,7 +84,8 @@ Voraussetzungen: Rust (stable), Node.js LTS, Visual Studio Build Tools (C++), We
 npm install
 npm run tauri dev      # startet die App; Debug-Builds öffnen eine Kopie von fixtures/vault unter %TEMP%
 cd src-tauri && cargo test
-npm run tauri build    # Installer: src-tauri/target/release/bundle/nsis/
+npm run tauri build    # Installer: src-tauri/target/release/bundle/nsis/ (braucht den Update-Schlüssel, siehe „Updates“)
+npm run tauri build -- --config src-tauri/tauri.ohne-updates.json   # Installer ohne Update-Paket, ohne Schlüssel
 ```
 
 - **Nie gegen den echten Vault entwickeln.** Debug-Builds nutzen einen eigenen Einstellungsordner
@@ -114,7 +119,50 @@ npm run tauri build    # Installer: src-tauri/target/release/bundle/nsis/
 - Der Starter-Vault liegt in `src-tauri/starter-vault/` und wird ins Programm eingebettet.
   Neu erzeugen: `bash scripts/build-starter-vault.sh "<Pfad zum Referenz-Vault>"`.
 - App-Icon neu erzeugen: `powershell -File scripts/make-app-icon.ps1` und danach `npx tauri icon app-icon.png`.
-- GitHub Actions (`.github/workflows/build.yml`, folgt in einem eigenen Commit) testet und baut den Installer; ein Tag `v*` veröffentlicht ihn als Release.
+- GitHub Actions (`.github/workflows/build.yml`, folgt in einem eigenen Commit) testet und baut den Installer; ein Tag `v*` veröffentlicht ihn als Release (mit Update-Datei, siehe „Updates“).
+- **Update-Oberfläche testen:** Dev-Builds suchen nie von selbst. Mit `COCKPIT_UPDATE_URL=<URL einer latest.json>`
+  (nur Debug-Builds, `http://` erlaubt) sucht „Nach Updates suchen“ dort statt auf GitHub. Installieren scheitert
+  dann absichtlich an der Signatur.
+
+## Updates
+
+Installierte Apps fragen beim Start (nur Release-Build, höchstens einmal am Tag)
+`https://github.com/Ch3rry-glitch/Ausbildungs-Copilot/releases/latest/download/latest.json` ab. Ist die Version dort
+neuer, bieten sie das Update an; installiert wird nur auf Klick und nur, wenn die Signatur zum öffentlichen Schlüssel
+in `src-tauri/tauri.conf.json` passt. Vorabversionen (`0.3.0-beta.1`) werden nie angeboten. Der Zeitpunkt der letzten
+Prüfung steht in `%APPDATA%\ausbildungs-cockpit\update.json`. Code: `src-tauri/src/update.rs`, `src/update.ts`.
+
+**Einmalig einrichten (nur Levin):**
+
+1. Schlüsselpaar erzeugen – **außerhalb des Repositorys**, mit Passwort (PowerShell):
+
+   ```powershell
+   npm run tauri signer generate -- -w "$env:USERPROFILE\.tauri\ausbildungs-cockpit.key"
+   ```
+
+   Das ergibt `ausbildungs-cockpit.key` (privat, **nie** committen oder weitergeben) und
+   `ausbildungs-cockpit.key.pub` (öffentlich). Schlüssel und Passwort sicher aufbewahren (z. B. Passwort-Manager):
+   Ohne sie lassen sich installierte Apps nie wieder aktualisieren – Mitschüler müssten neu installieren.
+2. Den Inhalt von `ausbildungs-cockpit.key.pub` in `src-tauri/tauri.conf.json` bei `plugins.updater.pubkey`
+   statt des Textes `PLATZHALTER: …` eintragen und committen. Solange der Platzhalter dort steht, sind Updates aus.
+3. Auf GitHub unter *Settings → Secrets and variables → Actions → New repository secret* anlegen:
+   - `TAURI_SIGNING_PRIVATE_KEY` = Inhalt von `ausbildungs-cockpit.key`
+   - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` = das Passwort
+4. Lokal mit Update-Paket bauen: vorher in PowerShell
+   `$env:TAURI_SIGNING_PRIVATE_KEY = Get-Content -Raw "$env:USERPROFILE\.tauri\ausbildungs-cockpit.key"` und
+   `$env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = "…"` setzen – oder ohne Update-Paket mit
+   `--config src-tauri/tauri.ohne-updates.json` bauen.
+
+**Neue Version veröffentlichen:**
+
+1. Version an drei Stellen gleich erhöhen (z. B. `0.2.0`): `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`,
+   `package.json`; committen und nach `main` bringen.
+2. Tag setzen und hochladen: `git tag v0.2.0` und `git push origin v0.2.0`.
+3. GitHub Actions prüft Tag = Version, Schlüssel eingetragen und Secret vorhanden, baut und signiert den Installer und
+   veröffentlicht die Release mit `…_x64-setup.exe`, `.sig` und `latest.json`. Ab dann bieten installierte Apps
+   das Update an (beim nächsten Start am nächsten Tag, sofort über „Nach Updates suchen“).
+
+Wer eine Version **ohne** Update-Funktion installiert hat (alles vor diesem Stand), muss einmal von Hand neu installieren.
 
 ## Aufbau
 
@@ -134,6 +182,7 @@ src-tauri/src/
   starter.rs              Starter-Vault anlegen, nie überschreiben
   obsidian.rs             obsidian://-Links
   config.rs               Einstellungen in %APPDATA%\ausbildungs-cockpit
+  update.rs               Updates über GitHub Releases (Tauri-Updater), höchstens einmal am Tag
   commands.rs             Tauri-Befehle
 prompts/                  KI-Prompts (ohne Neukompilieren anpassbar)
 src-tauri/tests/          Tests gegen fixtures/vault

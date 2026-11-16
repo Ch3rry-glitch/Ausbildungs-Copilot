@@ -16,6 +16,7 @@
 //! * [`ki`]      – KI hinter `LlmProvider` (Anthropic), Schlüssel im Anmeldeinformationsspeicher
 //! * [`aufgaben`] – Arbeitsaufträge und Lernaufgaben wie `00 Start/Aufgaben.md`, Abhaken, gelöst
 //! * [`fragen`]  – `#frage` / `#nochmal`, „geklärt“ (durchstreichen oder in „Geklärt“ verschieben)
+//! * [`update`]  – neue Versionen über GitHub Releases (Tauri-Updater), höchstens einmal am Tag
 //! * [`commands`] – Tauri-Befehle
 
 pub mod aufgaben;
@@ -33,6 +34,7 @@ pub mod model;
 pub mod obsidian;
 pub mod starter;
 pub mod unterricht;
+pub mod update;
 pub mod vault;
 pub mod watcher;
 pub mod write;
@@ -153,6 +155,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(update::UpdateState::default())
         .setup(|app| {
             let state = AppState::load(config_dir());
             let configured = state.config.lock().unwrap().vault_path.clone();
@@ -211,6 +215,9 @@ pub fn run() {
             commands::klausur_quellen,
             commands::klausur_quiz,
             commands::klausur_karteikarten,
+            update::update_status,
+            update::update_pruefen,
+            update::update_installieren,
         ])
         .run(tauri::generate_context!())
         .expect("Ausbildungs-Cockpit konnte nicht gestartet werden");
