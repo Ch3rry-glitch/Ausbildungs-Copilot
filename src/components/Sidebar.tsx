@@ -1,7 +1,7 @@
 import type { AppStatus } from "../api";
 import { Icon } from "../icons";
 
-export type View = "heute" | "unterricht" | "logbuch" | "aufgaben" | "fragen" | "notizen" | "einstellungen";
+export type View = "heute" | "unterricht" | "logbuch" | "aufgaben" | "fragen" | "klausur" | "notizen" | "einstellungen";
 
 // Reihenfolge laut SPEC §8. Noch nicht gebaute Bereiche zeigen ihren Meilenstein.
 const ACTIVE: { key: View; label: string }[] = [
@@ -73,6 +73,12 @@ export function Sidebar({
           <span className="soon">{it.milestone}</span>
         </button>
       ))}
+
+      {/* Klausur-Trainer: eigener Eintrag nach „Prüfungen“ */}
+      <button className={`nav-item ${view === "klausur" ? "active" : ""}`} onClick={() => onView("klausur")}>
+        {Icon.klausur}
+        Klausur-Trainer
+      </button>
 
       <div className="nav-sep" />
       <button className={`nav-item ${view === "notizen" ? "active" : ""}`} onClick={() => onView("notizen")}>

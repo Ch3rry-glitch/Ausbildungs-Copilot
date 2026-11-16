@@ -204,6 +204,26 @@ export interface FrageGeklaert {
 }
 export interface FragenEinstellungen { geklaertModus: GeklaertModus; }
 
+// ---------- Klausur-Trainer ----------
+export type FrageArt = "auswahl" | "kurz" | "karte";
+export type QuellArt = "unterricht" | "zusammenfassung" | "karteikarten" | "lernaufgabe" | "glossar";
+export interface KlausurFach {
+  kurz: string; ziel: string; quellen: number; unterricht: number; karteikarten: number;
+  glossar: number; lernaufgaben: number; nochmal: number;
+}
+export interface KlausurUebersicht { faecher: KlausurFach[]; }
+export interface QuizQuelle { path: string; title: string; art: QuellArt; datum: string | null; privat: boolean; vorausgewaehlt: boolean; }
+export interface QuizQuellen { fach: string; quellen: QuizQuelle[]; nochmal: FrageEintrag[]; }
+export interface QuizAnfrage { fach: string; pfade: string[]; mitKi: boolean; privatErlauben: boolean; anzahl: number; arten: FrageArt[]; }
+export interface QuizFrage {
+  art: FrageArt; frage: string; optionen: string[]; richtig: number | null; antwort: string;
+  erklaerung: string | null; quellePfad: string; quelleTitel: string; beleg: string /* wörtlich aus der Quelle */;
+}
+export interface QuizQuelleInfo { path: string; title: string; art: QuellArt; privat: boolean; gesendet: boolean; ekEntfernt: boolean; }
+export interface Quiz { fach: string; fragen: QuizFrage[]; quellen: QuizQuelleInfo[]; mitKi: boolean; ki: KiAufruf | null; warnungen: string[]; }
+export interface KarteikartenAnfrage { fach: string; fragen: QuizFrage[]; relPath: string | null /* null = Vorschau */; }
+export interface KarteikartenSet { relPath: string; text: string; karten: number; report: WriteReport | null; warnungen: string[]; }
+
 export interface FolderInfo {
   path: string;
   name: string;
@@ -268,6 +288,11 @@ export const api = {
   fragenEinstellungen: () => invoke<FragenEinstellungen>("fragen_einstellungen"),
   fragenEinstellungenSpeichern: (einstellungen: FragenEinstellungen) =>
     invoke<FragenEinstellungen>("fragen_einstellungen_speichern", { einstellungen }),
+  // Klausur-Trainer
+  klausurUebersicht: () => invoke<KlausurUebersicht>("klausur_uebersicht"),
+  klausurQuellen: (fach: string) => invoke<QuizQuellen>("klausur_quellen", { fach }),
+  klausurQuiz: (req: QuizAnfrage) => invoke<Quiz>("klausur_quiz", { req }),
+  klausurKarteikarten: (req: KarteikartenAnfrage) => invoke<KarteikartenSet>("klausur_karteikarten", { req }),
 };
 
 export function onVaultChanged(cb: (c: VaultChanged) => void): Promise<UnlistenFn> {

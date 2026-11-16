@@ -947,6 +947,159 @@ pub struct FragenEinstellungen {
     pub geklaert_modus: GeklaertModus,
 }
 
+// ---------------------------------------------------------------------------------------------
+// Klausur-Trainer: Quiz aus den eigenen Notizen (SPEC §6.8, §7, Regel 7)
+// ---------------------------------------------------------------------------------------------
+
+/// Fragetyp im Quiz.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum FrageArt {
+    /// Multiple Choice, eine richtige Antwort
+    Auswahl,
+    /// Kurzantwort, selbst bewertet nach dem Aufdecken
+    Kurz,
+    /// Karteikarte: umdrehen, selbst bewertet
+    Karte,
+}
+
+/// Woher eine Quelle für das Quiz stammt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum QuellArt {
+    Unterricht,
+    Zusammenfassung,
+    Karteikarten,
+    Lernaufgabe,
+    Glossar,
+}
+
+/// Ein Fach in der Übersicht des Klausur-Trainers.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KlausurFach {
+    pub kurz: String,
+    pub ziel: String,
+    /// mögliche Quellen (alle Arten)
+    pub quellen: usize,
+    pub unterricht: usize,
+    pub karteikarten: usize,
+    pub glossar: usize,
+    pub lernaufgaben: usize,
+    /// offene `#nochmal` des Fachs
+    pub nochmal: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KlausurUebersicht {
+    /// Fächer mit mindestens einer Quelle zuerst
+    pub faecher: Vec<KlausurFach>,
+}
+
+/// Eine mögliche Quelle – die Oberfläche zeigt sie **vor** dem KI-Aufruf (SPEC §7).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuizQuelle {
+    pub path: RelPath,
+    pub title: String,
+    pub art: QuellArt,
+    pub datum: Option<NaiveDate>,
+    pub privat: bool,
+    /// standardmäßig angehakt (nicht privat, die neuesten Unterrichtsnotizen)
+    pub vorausgewaehlt: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuizQuellen {
+    pub fach: String,
+    pub quellen: Vec<QuizQuelle>,
+    /// `#nochmal`-Zeilen des Fachs (Schwerpunkte)
+    pub nochmal: Vec<FrageEintrag>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuizAnfrage {
+    pub fach: String,
+    /// ausgewählte Quellen (müssen zu den Quellen des Fachs gehören)
+    pub pfade: Vec<RelPath>,
+    pub mit_ki: bool,
+    /// `10 Privat/` für **diesen** Vorgang an die KI (Regel 10)
+    #[serde(default)]
+    pub privat_erlauben: bool,
+    pub anzahl: u8,
+    pub arten: Vec<FrageArt>,
+}
+
+/// Eine Quizfrage – immer mit Quelle und wörtlichem Beleg aus dieser Quelle (Regel 7).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuizFrage {
+    pub art: FrageArt,
+    pub frage: String,
+    /// nur bei `auswahl`
+    #[serde(default)]
+    pub optionen: Vec<String>,
+    /// Index der richtigen Option (nur bei `auswahl`)
+    #[serde(default)]
+    pub richtig: Option<usize>,
+    pub antwort: String,
+    #[serde(default)]
+    pub erklaerung: Option<String>,
+    pub quelle_pfad: RelPath,
+    pub quelle_titel: String,
+    /// wörtliche Stelle aus der Quelle
+    pub beleg: String,
+}
+
+/// Was mit einer ausgewählten Quelle geschah.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuizQuelleInfo {
+    pub path: RelPath,
+    pub title: String,
+    pub art: QuellArt,
+    pub privat: bool,
+    /// an die KI gesendet (ohne KI: immer `false`)
+    pub gesendet: bool,
+    pub ek_entfernt: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Quiz {
+    pub fach: String,
+    pub fragen: Vec<QuizFrage>,
+    pub quellen: Vec<QuizQuelleInfo>,
+    pub mit_ki: bool,
+    pub ki: Option<KiAufruf>,
+    pub warnungen: Vec<String>,
+}
+
+/// KI-Fragen als Karteikarten-Set speichern. Ohne `rel_path`: nur Vorschau (Regel 9).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KarteikartenAnfrage {
+    pub fach: String,
+    pub fragen: Vec<QuizFrage>,
+    /// Pfad aus der Vorschau → anlegen; `None` → nur Vorschau
+    #[serde(default)]
+    pub rel_path: Option<RelPath>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KarteikartenSet {
+    pub rel_path: RelPath,
+    pub text: String,
+    pub karten: usize,
+    /// `None` bei Vorschau
+    pub report: Option<WriteReport>,
+    pub warnungen: Vec<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

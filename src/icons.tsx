@@ -41,4 +41,7 @@ export const Icon: Record<string, ReactElement> = {
   kopieren: p(["M11 9h9a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-9a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2z", "M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"]),
   check: p(["M20 6L9 17l-5-5"]),
   chevronDown: p(["M6 9l6 6l6-6"]),
+  // Klausur-Trainer
+  klausur: p(["M12 3l9 4.5l-9 4.5l-9-4.5z", "M6 9.5v4.5c0 1.7 2.7 3 6 3s6-1.3 6-3V9.5", "M21 7.5v5"]),
+  karten: p(["M4 6a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z", "M17 7l2.5.6a2 2 0 0 1 1.5 2.4l-2.2 9"]),
 };
